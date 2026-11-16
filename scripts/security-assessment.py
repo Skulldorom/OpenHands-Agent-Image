@@ -44,17 +44,20 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
         vendor = tracker.get(source, {}).get(vulnerability["VulnerabilityID"], {})
         release = vendor.get("releases", {}).get("trixie", {})
         severity = vulnerability["Severity"]
+        origin = "inherited finding" if inherited else (
+            "new finding in inherited package" if (result.get("Class"), result.get("Type"), vulnerability["PkgName"]) in upstream_packages
+            else "added package/component")
         reasons = []
         if severity == "CRITICAL":
             reasons.append("critical exposure not accepted")
         if severity in {"HIGH", "CRITICAL"}:
+            if origin != "inherited finding":
+                # Risk this image introduces has no upstream baseline to defer to.
+                reasons.append("introduced by this image; upstream baseline lacks this finding")
             if vulnerability.get("FixedVersion"):
                 reasons.append("fixed version advertised; supported package/binary remediation must be verified")
             if vulnerability["VulnerabilityID"] in policy["high_risk_cves"]:
                 reasons.append(policy["high_risk_cves"][vulnerability["VulnerabilityID"]])
-        origin = "inherited finding" if inherited else (
-            "new finding in inherited package" if (result.get("Class"), result.get("Type"), vulnerability["PkgName"]) in upstream_packages
-            else "added package/component")
         rows.append({
             "package": vulnerability["PkgName"], "source_package": source,
             "cve": vulnerability["VulnerabilityID"], "severity": severity,

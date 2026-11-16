@@ -54,13 +54,24 @@ Both docker/docker CVEs describe daemon operations (archive upload into a contai
 
 Buildx already uses x/net v0.62.0; Compose already uses go-archive v0.3.3. Replacing those tools would not fix the other tool's module. Vendor source evidence: `https://raw.githubusercontent.com/<repository>/<release>/go.mod` at the above tags. Earlier downloaded vendor packages' embedded module metadata agrees with these manifests; CI scans the actual candidate binaries. A dependency manifest is supporting evidence, not a substitute for scanning the binary.
 
+On 2026-11-16 the published release artifacts for those four tags were also downloaded and inspected read-only, without executing them, to test the assumption that a newer vendor release fixes each blocker. Embedded Go module build information:
+
+| Downloaded artifact | Embedded module | Fixed module satisfied? |
+| --- | --- | --- |
+| `gh_2.104.0_linux_amd64/bin/gh` (GitHub CLI, latest release) | `golang.org/x/net` v0.61.0 | No; still v0.61.0 |
+| `rootlesskit` v3.3.0 (RootlessKit, latest release) | `golang.org/x/net` v0.60.0 | No; still v0.60.0 |
+| `docker-compose-linux-x86_64` v5.7.1 (Compose, latest release) | `golang.org/x/net` v0.60.0, `github.com/moby/go-archive` v0.3.3 | x/net not fixed; go-archive clean |
+| `buildx-v0.39.0.linux-amd64` (Buildx, latest release) | `github.com/moby/go-archive` v0.2.0, `github.com/docker/docker` v28.5.2+incompatible, `golang.org/x/net` v0.62.0 | go-archive and docker not fixed; x/net clean |
+
+Every blocker is confirmed still present in the newest released vendor artifact of the affected tool, so no supported drop-in upgrade exists. This inspection cannot by itself prove exploitability or non-exploitability; it only establishes that upgrading the installed vendor packages would not change these findings. `CVE-2026-6653` remains unaffected by this check because it is an OS package with no supported trixie fix.
+
 The upstream trixie image configured Docker's **bookworm** vendor channel. Docker officially supports [Debian trixie](https://docs.docker.com/engine/install/debian/). This repository aligns only that vendor suite to trixie using the inherited signing key and signed APT metadata; no Debian release mixing, key replacement, custom build or downgrade. Both vendor suites currently offer Buildx 0.39.0, Compose 5.7.1 and Docker/rootless extras 29.9.3. Channel alignment is correctness/support remediation, not a claim to fix the embedded Go CVEs. CI verifies tool startup/version commands and Agent Server 1.62.0; no host Docker daemon or Docker-in-Docker is required or started. Full Docker engine workload compatibility is not established by version checks alone.
 
 HTTP/network parser flaws can affect tools processing remote data; archive flaws can affect untrusted build contexts. Merely not starting a Docker daemon does not prove client/plugin code unreachable. No custom source rebuild, latest-branch binary, removal of functionality, or unsupported module replacement is accepted.
 
 ## Inventory versus gate
 
-`security/policy.json` specifies owner, review date and designated CVEs. Every CRITICAL finding blocks pending review; all HIGH/CRITICAL findings with advertised fixes block conservatively, including module-only fixes until supported binaries are verified. Designated high-risk findings block even without fixes. All secrets block at every severity. Unfixed HIGH findings outside those categories remain explicitly unresolved inventory risks, not CVE exceptions or a declaration of safety. This does not grant a future exemption to CVE-2026-6653 or any newly reported CRITICAL finding.
+`security/policy.json` specifies owner, review date and designated CVEs. Every CRITICAL finding blocks pending review; all HIGH/CRITICAL findings with advertised fixes block conservatively, including module-only fixes until supported binaries are verified. Designated high-risk findings block even without fixes. Any HIGH/CRITICAL finding that this image introduces — a new finding in an inherited package or a finding in a package this Dockerfile adds — blocks regardless of fix availability, because it has no upstream baseline to defer to. All secrets block at every severity. Unfixed HIGH findings inherited from the upstream image and outside those categories remain explicitly unresolved inventory risks, not CVE exceptions or a declaration of safety. This does not grant a future exemption to CVE-2026-6653 or any newly reported CRITICAL finding.
 
 No exceptions are accepted. The evaluator rejects nonempty exception lists until a separately reviewed narrow mechanism is implemented. Any future exception must have exact CVE/package/version scope, reason, owner, review date and evidence. No blanket unfixed or vendor-wide exemption is allowed. The initial release remains blocked while the above designated findings persist.
 

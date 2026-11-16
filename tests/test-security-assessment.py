@@ -28,12 +28,38 @@ class AssessmentTests(unittest.TestCase):
         return {"PkgName": "libxml2", "VulnerabilityID": cve, "Severity": severity,
                 "InstalledVersion": "1.0", "FixedVersion": fixed}
 
-    def test_fixed_high_blocks_and_unfixed_is_retained(self):
-        self.candidate["Results"][0]["Vulnerabilities"] = [self.vulnerability(fixed="2.0"), self.vulnerability(cve="CVE-2026-0002")]
+    def test_fixed_inherited_high_blocks_and_unfixed_is_retained(self):
+        vulnerabilities = [self.vulnerability(fixed="2.0"), self.vulnerability(cve="CVE-2026-0002")]
+        self.base["Results"][0]["Vulnerabilities"] = deepcopy(vulnerabilities)
+        self.candidate["Results"][0]["Vulnerabilities"] = deepcopy(vulnerabilities)
         result = self.run_assessment()
         self.assertFalse(result["pass"])
         self.assertEqual(len(result["findings"]), 2)
-        self.assertEqual(len(result["blockers"]), 1)
+        self.assertEqual([row["cve"] for row in result["blockers"]], ["CVE-2026-0001"])
+
+    def test_unfixed_inherited_high_is_inventory_only(self):
+        vulnerability = self.vulnerability()
+        self.base["Results"][0]["Vulnerabilities"] = [deepcopy(vulnerability)]
+        self.candidate["Results"][0]["Vulnerabilities"] = [deepcopy(vulnerability)]
+        result = self.run_assessment()
+        self.assertEqual(result["origin_counts"], {"inherited finding": 1})
+        self.assertEqual(result["blockers"], [])
+        self.assertTrue(result["pass"])
+
+    def test_introduced_high_blocks_without_upstream_baseline(self):
+        self.candidate["Results"][0]["Vulnerabilities"] = [self.vulnerability(cve="CVE-2026-0009")]
+        result = self.run_assessment()
+        self.assertEqual(result["findings"][0]["origin"], "new finding in inherited package")
+        self.assertFalse(result["pass"])
+
+    def test_added_package_high_blocks(self):
+        self.candidate["Results"].append({"Target": "pg", "Class": "lang-pkgs", "Type": "gobinary",
+                                         "Packages": [{"Name": "example/mod"}],
+                                         "Vulnerabilities": [{"PkgName": "example/mod", "VulnerabilityID": "CVE-2026-0010",
+                                                              "Severity": "HIGH", "InstalledVersion": "v1"}]})
+        result = self.run_assessment()
+        self.assertEqual(result["findings"][0]["origin"], "added package/component")
+        self.assertFalse(result["pass"])
 
     def test_critical_and_designated_unfixed_block(self):
         for v in [self.vulnerability("CRITICAL"), self.vulnerability(cve="CVE-2026-41567")]:

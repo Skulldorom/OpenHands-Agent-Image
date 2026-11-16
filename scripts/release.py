@@ -38,7 +38,7 @@ def gh(*args):
 
 
 def fingerprint():
-    files = subprocess.check_output(["git", "ls-files", "Dockerfile", "scripts", "tests", ".github/workflows", ".dockerignore", "compatibility.json"], text=True).splitlines()
+    files = subprocess.check_output(["git", "ls-files", "Dockerfile", "scripts", "tests", ".github/workflows", ".dockerignore", "compatibility.json", "security/policy.json"], text=True).splitlines()
     h = hashlib.sha256()
     for name in files:
         h.update(name.encode() + b"\0" + Path(name).read_bytes())
@@ -89,6 +89,10 @@ def plan():
 def publish(digest):
     assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
     state = json.loads(Path("state.json").read_text())
+    assessment = json.loads(Path("security-assessment.json").read_text())
+    assert assessment["pass"] and not assessment["blockers"] and not assessment["secrets"], "Security gate not passed"
+    assert assessment["candidate"] == IMAGE + "@" + digest, "Assessment is for another candidate"
+    assert assessment["upstream"] == "ghcr.io/openhands/agent-server@" + state["upstream_digest"]
     state["image_digest"] = digest
     version = state["version"]
     immutable = [version, "sha-" + state["commit"]]
@@ -111,12 +115,15 @@ Upstream: `ghcr.io/openhands/agent-server@{state['upstream_digest']}`
 Upstream source: `{state['upstream_source']}`
 Compatibility: Agent Server **{state['agent_server_version']}** only. Host compatibility requires the same approved version; no cross-version guarantee.
 Git real-commit, PostgreSQL 17 backup/restore, API readiness, signals and security gates passed in CI.
+Security inventory: {assessment['severity_counts']}; advertised fixes: {assessment['with_advertised_fix']}; no advertised fixes: {assessment['without_advertised_fix']}.
+Accepted CVE exceptions: {assessment['accepted_exceptions']}. A passing risk gate is not a vulnerability-free image.
+The attached security-assessment.md groups all findings and inherited risks by package/CVE; raw candidate/upstream scans are attached.
 Full state and build fingerprint are attached in state.json. Previous versions remain available for rollback.
 
 _This release was created by an AI-authored OpenHands workflow on behalf of the repository owner._
 """
     Path("release-notes.txt").write_text(notes)
-    subprocess.run(["gh", "release", "create", "v" + version, "--target", state["commit"], "--title", "v" + version, "--notes-file", "release-notes.txt", "state.json"], check=True)
+    subprocess.run(["gh", "release", "create", "v" + version, "--target", state["commit"], "--title", "v" + version, "--notes-file", "release-notes.txt", "state.json", "security-assessment.md", "security-assessment.json", "security-gate.json", "trivy.json", "upstream-trivy.json", "scanner-version.json", "scanner-database.sha256"], check=True)
     subprocess.run(["docker", "buildx", "imagetools", "create", "--prefer-index=false", "--tag", IMAGE + ":latest", IMAGE + "@" + digest], check=True)
 
 

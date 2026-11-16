@@ -118,6 +118,14 @@ docker buildx imagetools inspect ghcr.io/skulldorom/openhands-agent:1.0.0 --raw
 
 Attestations are not an independent cryptographic publisher signature. Review CI and source revision as well as pinning the digest.
 
+### Inherited vulnerability limitations
+
+This image is **not vulnerability-free**. The approved Agent Server base includes Chromium, libxml2, Docker tools and GitHub CLI with inherited vulnerabilities. Supported signed trixie upgrades remediate available Debian fixes; upstream's inherited Docker bookworm vendor channel is aligned to Docker's supported trixie channel without changing Debian releases. No tools are removed or downgraded to reduce counts. Version-output tests cover vendor tools; they do not certify every Docker operation.
+
+CI scans candidate and exact upstream digest using one frozen Trivy database. Artifacts retain unsuppressed all-severity `trivy.json`, `upstream-trivy.json`, package inventory, official Debian tracker snapshot, scanner version/database hash, `security-assessment.json`/`.md` (grouped package/CVE provenance and versions), and `security-gate.json` (separate decision). Any release attaches scan/assessment evidence and names remaining risks. A gate pass means the configured policy passed, not that remaining vulnerabilities are harmless. See [SECURITY.md](SECURITY.md) and [assessment evidence](security/ASSESSMENT.md).
+
+`CVE-2026-6653` remains a blocker: Debian calls this libxml2 issue minor but confirms trixie is affected. General-purpose agent workloads cannot prove untrusted XML unreachable. Vendor Go-module findings also remain blockers until supported fixed binaries or narrowly reviewed evidence justify a change. No exceptions are currently accepted.
+
 ### Versioning
 
 Initial release is `v1.0.0`. Afterwards patch by default. Explicit manual `bump` overrides commit directives. With `auto`, standalone `release:major` wins over `release:minor` in commits since the last release; otherwise patch. Major resets minor/patch; minor resets patch. First release remains 1.0.0. Explicit manual bumps force release planning. A commit tag identifies the first validated build from that commit; scheduled upstream rebuilds from the same commit preserve that tag and receive new immutable version tags. Use version/digest pins to identify a specific upstream rebuild. No PR labels, automated commits or tag-trigger recursion.
@@ -143,7 +151,7 @@ See [SECURITY.md](SECURITY.md). No credentials or identities belong in build arg
 * PostgreSQL command missing: check PATH/image digest. Root errors require an unprivileged account.
 * External connection failure: check network, provisioned credentials and `pg_hba.conf`; no fallback daemon starts.
 * Upstream CI failure: retain working digest, inspect contract/version error, stage host testing before approving policy changes.
-* Trivy failure: all HIGH/CRITICAL vulnerabilities (including unfixed findings) and detected secrets block promotion. Inspect the complete JSON report and package inventory. A passing scan is not proof of security. Scanner/database errors fail closed.
+* Trivy failure: all CRITICAL findings, advertised-fix HIGH/CRITICAL findings, designated high-risk CVEs (including unfixed), and every detected secret block promotion. Unfixed HIGH findings remain in the complete inventory; they are not automatically declared safe. Inspect the complete JSON report and package inventory. A passing scan is not proof of security. Scanner/database errors fail closed.
 * GHCR pull denied: confirm package is public and Actions has package write permission.
 
 Local checks need Docker Engine/Buildx, bash, curl, Python 3 and ShellCheck:

@@ -1,0 +1,13 @@
+{
+  "owner": "Skulldorom/OpenHands-Agent-Image maintainers",
+  "review_date": "2026-12-16",
+  "block_all_critical": true,
+  "high_risk_cves": {
+    "CVE-2026-6653": "Affected libxml2 can consume attacker-controlled XML in general-purpose agent workloads; lack of reachability is not proven.",
+    "CVE-2026-78661": "Inherited networking tools process remote data; fixed module exists but supported vendor binaries remain affected.",
+    "CVE-2026-17106": "Buildx archive processing can receive untrusted build inputs; preserve blocker until supported vendor remediation.",
+    "CVE-2026-41567": "Buildx embeds affected Docker code; vulnerable-path unreachability has not been demonstrated.",
+    "CVE-2026-42306": "Buildx embeds affected Docker code; vulnerable-path unreachability has not been demonstrated."
+  },
+  "exceptions": []
+}

@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 image=${1:?image required}
+# Git/package format variables must expand inside the container, not on the runner.
+# shellcheck disable=SC2016
 timeout 60 docker run --rm "$image" --exec sh -eu -c '
  test -x /usr/local/bin/openhands-agent-server
  command -v tini; command -v chromium
+ gh --version
+ rootlesskit --version
+ docker --version
+ docker buildx version
+ docker compose version
+ dpkg-query -W libxml2
+ dpkg-query -W -f="\${binary:Package} \${Depends}\n" | grep libxml2
+ ldd /usr/lib/chromium/chromium
+ grep -q "https://download.docker.com/linux/debian trixie stable" /etc/apt/sources.list.d/docker.list
  test ! -d /var/lib/postgresql/17/main
 '
 key=$(python3 -c "import secrets; print(secrets.token_hex(24))")

@@ -32,6 +32,9 @@ RUN test "$(. /etc/os-release; printf '%s' "$VERSION_CODENAME")" = trixie \
         'Components: main' \
         'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
         > /etc/apt/sources.list.d/debian.sources \
+    && test -f /etc/apt/sources.list.d/docker.list \
+    && grep -q 'https://download.docker.com/linux/debian bookworm stable' /etc/apt/sources.list.d/docker.list \
+    && sed -i 's@https://download.docker.com/linux/debian bookworm stable@https://download.docker.com/linux/debian trixie stable@' /etc/apt/sources.list.d/docker.list \
     && apt-get -o Acquire::Retries=3 update \
     && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends postgresql-17 postgresql-client-17 \

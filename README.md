@@ -143,7 +143,7 @@ See [SECURITY.md](SECURITY.md). No credentials or identities belong in build arg
 * PostgreSQL command missing: check PATH/image digest. Root errors require an unprivileged account.
 * External connection failure: check network, provisioned credentials and `pg_hba.conf`; no fallback daemon starts.
 * Upstream CI failure: retain working digest, inspect contract/version error, stage host testing before approving policy changes.
-* Trivy failure: fixed HIGH/CRITICAL vulnerabilities and detected secrets block promotion. Unfixed vulnerabilities remain a known inherited risk; inspect reports. Scanner/database errors fail closed.
+* Trivy failure: all HIGH/CRITICAL vulnerabilities (including unfixed findings) and detected secrets block promotion. Inspect the complete JSON report and package inventory. A passing scan is not proof of security. Scanner/database errors fail closed.
 * GHCR pull denied: confirm package is public and Actions has package write permission.
 
 Local checks need Docker Engine/Buildx, bash, curl, Python 3 and ShellCheck:

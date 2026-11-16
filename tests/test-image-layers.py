@@ -9,10 +9,16 @@ def check_layers(stream):
     count = 0
     with tarfile.open(fileobj=stream, mode="r|") as archive:
         for member in archive:
-            if not member.isfile() or not member.name.endswith("/layer.tar"):
+            if not member.isfile() or not (member.name.endswith("/layer.tar") or member.name.startswith("blobs/sha256/")):
+                continue
+            try:
+                layer = tarfile.open(fileobj=archive.extractfile(member), mode="r|*")
+            except tarfile.ReadError:
+                if member.name.endswith("/layer.tar"):
+                    raise
                 continue
             count += 1
-            with tarfile.open(fileobj=archive.extractfile(member), mode="r|") as layer:
+            with layer:
                 for entry in layer:
                     name = entry.name.lstrip("./")
                     if name in {"etc/ssl/private/ssl-cert-snakeoil.key", "etc/ssl/certs/ssl-cert-snakeoil.pem"}:

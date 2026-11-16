@@ -20,6 +20,24 @@ Debian describes a use-after-free in `xmlParseInternalSubset`, reached through c
 
 No supported trixie fix was available at assessment. Do not mix releases, swap the shared library manually, or claim not affected based on version prefix. Keep blocked pending a supported fix or a CVE-specific, version-scoped reachability assessment accepted by the owner. No VEX assertion is warranted with the current evidence.
 
+## Measured CI result (run 43860189443)
+
+The gate ran on candidate `ghcr.io/skulldorom/openhands-agent@sha256:0cf30566615316d28fc88ad29d1cd7d07eb711e2949cdc3241c6e976352df4a5` (Debian 13.7) and its exact upstream build. Unsuppressed all-severity inventory: 1 CRITICAL, 529 HIGH, 797 MEDIUM, 1152 LOW, 38 UNKNOWN = 2517 findings; 28 advertise a fix, 2489 do not. Origins: 2466 inherited from upstream, 51 in added packages (locale/l10n and libxslt only; none HIGH or CRITICAL). 24 lower-severity rows advertise fixes in Node/Go components outside this repository's remediation scope and were already present upstream. Zero secrets. Removed upstream pairs (libxml2, linux-libc-dev, PostgreSQL) confirm the applied remediation where Debian has a fix.
+
+The gate blocked with 7 vulnerability instances, and promotion plus `v1.0.0` creation were skipped:
+
+| Package | CVE | Severity | Installed | Fixed | Binary |
+| --- | --- | --- | --- | --- | --- |
+| libxml2 | CVE-2026-6653 | CRITICAL | 2.12.7+dfsg+really2.9.14-2.1+deb13u3 | none | OS package |
+| golang.org/x/net | CVE-2026-78661 | HIGH | v0.61.0 | 0.62.0 | usr/bin/gh |
+| golang.org/x/net | CVE-2026-78661 | HIGH | v0.60.0 | 0.62.0 | usr/bin/rootlesskit |
+| golang.org/x/net | CVE-2026-78661 | HIGH | v0.60.0 | 0.62.0 | docker-compose plugin |
+| github.com/moby/go-archive | CVE-2026-17106 | HIGH | v0.2.0 | 0.3.0 | docker-buildx plugin |
+| github.com/docker/docker | CVE-2026-41567 | HIGH | v28.5.2 | none | docker-buildx plugin |
+| github.com/docker/docker | CVE-2026-42306 | HIGH | v28.5.2 | none | docker-buildx plugin |
+
+Consequently `v1.0.0` is **not published**, `latest` remains untouched and the package has no tags. Remediation requires an upstream base refresh that ships fixed vendor binaries or a supported trixie libxml2 fix; neither exists at assessment time.
+
 ## Supported vendor binaries
 
 Official latest release tags and their go.mod were checked on 2026-11-16:

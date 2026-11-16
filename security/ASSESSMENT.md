@@ -24,7 +24,7 @@ No supported trixie fix was available at assessment. Do not mix releases, swap t
 
 The gate ran on candidate `ghcr.io/skulldorom/openhands-agent@sha256:0cf30566615316d28fc88ad29d1cd7d07eb711e2949cdc3241c6e976352df4a5` (Debian 13.7) and its exact upstream build. Unsuppressed all-severity inventory: 1 CRITICAL, 529 HIGH, 797 MEDIUM, 1152 LOW, 38 UNKNOWN = 2517 findings; 28 advertise a fix, 2489 do not. Origins: 2466 inherited from upstream, 51 in added packages (locale/l10n and libxslt only; none HIGH or CRITICAL). 24 lower-severity rows advertise fixes in Node/Go components outside this repository's remediation scope and were already present upstream. Zero secrets. Removed upstream pairs (libxml2, linux-libc-dev, PostgreSQL) confirm the applied remediation where Debian has a fix.
 
-The gate blocked with 7 vulnerability instances, and promotion plus `v1.0.0` creation were skipped:
+The gate blocked with 7 vulnerability instances, and promotion plus `v1.0.0` creation were skipped. Replaying that retained scan under the current policy, which also blocks findings this image introduces, still yields the same 7 instances: none of the 51 added-package findings is HIGH or CRITICAL, so the introduced-finding rule adds no blocker to this candidate while closing the gap for future ones.
 
 | Package | CVE | Severity | Installed | Fixed | Binary |
 | --- | --- | --- | --- | --- | --- |

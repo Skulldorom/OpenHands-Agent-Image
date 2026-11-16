@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 state.json
 candidate.json
+security-assessment.json
+security-assessment.md
+security-gate.json
+security-blockers.md

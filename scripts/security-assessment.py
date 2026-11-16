@@ -18,6 +18,14 @@ def findings(report):
 def key(vulnerability):
     return vulnerability["PkgName"], vulnerability["VulnerabilityID"]
 
+def scope(result):
+    # OS results embed the scanned image reference, which differs per artifact;
+    # language results must stay per-binary so a finding new in one binary is not
+    # masked by the same package/CVE in a different inherited binary.
+    return "os" if result.get("Class") == "os-pkgs" else result["Target"]
+
+def identity(result, vulnerability):
+    return scope(result), result.get("Class"), result.get("Type"), *key(vulnerability)
 
 def assess(candidate, upstream, policy, tracker, expected_candidate, expected_upstream):
     assert candidate["ArtifactName"] == expected_candidate, "Candidate digest mismatch"
@@ -31,21 +39,20 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
     assert policy["exceptions"] == [], "No exception mechanism approved; fail closed"
     old = defaultdict(list)
     for result, package, vulnerability in findings(upstream):
-        old[(result.get("Class"), result.get("Type"), *key(vulnerability))].append(vulnerability)
+        old[identity(result, vulnerability)].append(vulnerability)
     upstream_packages = {
-        (result.get("Class"), result.get("Type"), package["Name"])
+        (scope(result), result.get("Class"), result.get("Type"), package["Name"])
         for result in upstream["Results"] for package in result.get("Packages", [])
     }
     rows = []
     for result, package, vulnerability in findings(candidate):
-        identity = (result.get("Class"), result.get("Type"), *key(vulnerability))
-        inherited = old.get(identity, [])
+        inherited = old.get(identity(result, vulnerability), [])
         source = package.get("SrcName", vulnerability["PkgName"])
         vendor = tracker.get(source, {}).get(vulnerability["VulnerabilityID"], {})
         release = vendor.get("releases", {}).get("trixie", {})
         severity = vulnerability["Severity"]
         origin = "inherited finding" if inherited else (
-            "new finding in inherited package" if (result.get("Class"), result.get("Type"), vulnerability["PkgName"]) in upstream_packages
+            "new finding in inherited package" if (scope(result), result.get("Class"), result.get("Type"), vulnerability["PkgName"]) in upstream_packages
             else "added package/component")
         reasons = []
         if severity == "CRITICAL":

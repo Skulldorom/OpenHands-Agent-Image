@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
-ARG UPSTREAM_IMAGE=ghcr.io/openhands/agent-server@sha256:163c9d8b0d9ec48d4936d10ce9f109fc380a7a417d83a83c4ba4fe9a4a8efdcb
+ARG UPSTREAM_IMAGE=ghcr.io/openhands/agent-server@sha256:6a0fe47417e1d1227592f693880b0292ebdd4f59fbfe517c8b8685e7c455abe3
 FROM ${UPSTREAM_IMAGE}
 ARG UPSTREAM_IMAGE
-ARG UPSTREAM_DIGEST=sha256:163c9d8b0d9ec48d4936d10ce9f109fc380a7a417d83a83c4ba4fe9a4a8efdcb
+ARG UPSTREAM_DIGEST=sha256:6a0fe47417e1d1227592f693880b0292ebdd4f59fbfe517c8b8685e7c455abe3
 ARG VERSION=dev
 ARG REVISION=unknown
 LABEL org.opencontainers.image.title="OpenHands Agent with PostgreSQL 17" \

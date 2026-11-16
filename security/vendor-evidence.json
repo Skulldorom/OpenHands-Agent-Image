@@ -1,0 +1,46 @@
+{
+  "checked": "2026-11-16",
+  "method": "Read-only inspection of the newest official release artifact per tool: embedded Go module build information and the release go.mod. No artifact was executed.",
+  "artifacts": [
+    {
+      "package": "gh",
+      "target": "usr/bin/gh",
+      "release": "v2.104.0",
+      "url": "https://github.com/cli/cli/releases/tag/v2.104.0",
+      "modules": {
+        "golang.org/x/net": "v0.61.0"
+      }
+    },
+    {
+      "package": "docker-ce-rootless-extras",
+      "target": "usr/bin/rootlesskit",
+      "release": "v3.3.0",
+      "url": "https://github.com/rootless-containers/rootlesskit/releases/tag/v3.3.0",
+      "modules": {
+        "golang.org/x/net": "v0.60.0"
+      }
+    },
+    {
+      "package": "docker-compose-plugin",
+      "target": "usr/libexec/docker/cli-plugins/docker-compose",
+      "release": "v5.7.1",
+      "url": "https://github.com/docker/compose/releases/tag/v5.7.1",
+      "modules": {
+        "golang.org/x/net": "v0.60.0",
+        "github.com/moby/go-archive": "v0.3.3"
+      }
+    },
+    {
+      "package": "docker-buildx-plugin",
+      "target": "usr/libexec/docker/cli-plugins/docker-buildx",
+      "release": "v0.39.0",
+      "url": "https://github.com/docker/buildx/releases/tag/v0.39.0",
+      "modules": {
+        "github.com/moby/go-archive": "v0.2.0",
+        "github.com/docker/docker": "v28.5.2+incompatible",
+        "golang.org/x/net": "v0.62.0"
+      }
+    }
+  ],
+  "review_by": "2026-12-16"
+}

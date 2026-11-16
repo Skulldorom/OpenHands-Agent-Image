@@ -77,6 +77,23 @@ class AssessmentTests(unittest.TestCase):
         self.assertEqual(result["findings"][0]["origin"], "inherited finding")
         self.assertEqual(result["removed_package_cves"], [("libxml2", "CVE-2026-0003")])
 
+    def test_same_cve_in_another_binary_is_not_inherited(self):
+        upstream_result = {"Target": "usr/bin/gh", "Class": "lang-pkgs", "Type": "gobinary",
+                           "Packages": [{"Name": "golang.org/x/net"}],
+                           "Vulnerabilities": [{"PkgName": "golang.org/x/net", "VulnerabilityID": "CVE-2026-78661",
+                                                "Severity": "HIGH", "InstalledVersion": "v0.61.0"}]}
+        added_result = {"Target": "usr/bin/newtool", "Class": "lang-pkgs", "Type": "gobinary",
+                        "Packages": [{"Name": "golang.org/x/net"}],
+                        "Vulnerabilities": [{"PkgName": "golang.org/x/net", "VulnerabilityID": "CVE-2026-78661",
+                                             "Severity": "HIGH", "InstalledVersion": "v0.60.0"}]}
+        self.base["Results"].append(upstream_result)
+        self.candidate["Results"] += [deepcopy(upstream_result), added_result]
+        result = self.run_assessment()
+        origins = {row["target"]: row["origin"] for row in result["findings"]}
+        self.assertEqual(origins["usr/bin/gh"], "inherited finding")
+        self.assertEqual(origins["usr/bin/newtool"], "added package/component")
+        self.assertFalse(result["pass"])
+
     def test_identity_and_unapproved_exceptions_fail_closed(self):
         self.candidate["ArtifactName"] = "wrong"
         with self.assertRaises(AssertionError):

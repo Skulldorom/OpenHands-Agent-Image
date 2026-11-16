@@ -15,7 +15,7 @@ Official `ghcr.io/openhands/agent-server:latest-python`, resolved to an immutabl
 
 **Approved Agent Server version: exactly 1.62.0.** Use an independently compatible Agent Canvas host. No official blanket cross-version compatibility guarantee was established. CI verifies registry entrypoint, command, user, working directory, build source version, API startup and signals. Unknown versions or contracts fail closed. Approving another version requires a deliberate `compatibility.json` change, wrapper review and host staging tests; API smoke tests alone do not establish every Canvas feature's compatibility.
 
-Sources: [inspected Dockerfile](https://github.com/OpenHands/software-agent-sdk/blob/1d4c0249668c86d4327af51af1659330f8f0dbfc/openhands-agent-server/openhands/agent_server/docker/Dockerfile), [Docker runtime](https://github.com/OpenHands/software-agent-sdk/blob/1d4c0249668c86d4327af51af1659330f8f0dbfc/openhands-agent-server/openhands/agent_server/docker_runtime/registry.py#L630-L775), [official SDK documentation](https://docs.openhands.dev/sdk), [local deployment documentation](https://docs.openhands.dev/openhands/usage/run-openhands/local-setup).
+Sources: [inspected Dockerfile](https://github.com/OpenHands/software-agent-sdk/blob/48145f7728cd4f9daf5d2f96785e6c91b7057249/openhands-agent-server/openhands/agent_server/docker/Dockerfile), [Docker runtime](https://github.com/OpenHands/software-agent-sdk/blob/48145f7728cd4f9daf5d2f96785e6c91b7057249/openhands-agent-server/openhands/agent_server/docker_runtime/registry.py#L630-L775), [official SDK documentation](https://docs.openhands.dev/sdk), [local deployment documentation](https://docs.openhands.dev/openhands/usage/run-openhands/local-setup).
 
 ## Runtime Git identity
 
@@ -125,6 +125,15 @@ This image is **not vulnerability-free**. The approved Agent Server base include
 CI scans candidate and exact upstream digest using one frozen Trivy database. Artifacts retain unsuppressed all-severity `trivy.json`, `upstream-trivy.json`, package inventory, official Debian tracker snapshot, scanner version/database hash, `security-assessment.json`/`.md` (grouped package/CVE provenance and versions), and `security-gate.json` (separate decision). Any release attaches scan/assessment evidence and names remaining risks. A gate pass means the configured policy passed, not that remaining vulnerabilities are harmless. See [SECURITY.md](SECURITY.md) and [assessment evidence](security/ASSESSMENT.md).
 
 `CVE-2026-6653` remains a blocker: Debian calls this libxml2 issue minor but confirms trixie is affected. General-purpose agent workloads cannot prove untrusted XML unreachable. Vendor Go-module findings also remain blockers until supported fixed binaries or narrowly reviewed evidence justify a change. No exceptions are currently accepted.
+
+### Release status
+
+`v1.0.0` is **not published** and no tag exists for this package. The last validated candidate was blocked by seven inherited findings, including CRITICAL `libxml2` `CVE-2026-6653`, which has no fixed `trixie` or `trixie-security` package (`trixie-security` still ships `2.12.7+dfsg+really2.9.14-2.1+deb13u1`, older than the installed `+deb13u3`). For that historical candidate, every build-and-test stage passed; only the risk gate failed. The refreshed upstream pin must be rebuilt and assessed independently; historical test results do not validate it. Generated blocker evidence: `security-blockers.md` (CI artifact `validation-<run>`); the recorded vendor evidence is `security/vendor-evidence.json` and expires 2026-12-16. Unblocking requires one of:
+
+* an upstream base refresh that ships fixed vendor binaries for the Go-module findings, **and** a supported Debian fix for `libxml2`;
+* a CVE- and version-scoped reachability assessment accepted by the owner, implemented as reviewed narrow matching rather than a blanket exception.
+
+Do not publish while these findings persist, and do not pull the package expecting tags: `latest` and `1.0.0` return `MANIFEST_UNKNOWN`.
 
 ### Versioning
 

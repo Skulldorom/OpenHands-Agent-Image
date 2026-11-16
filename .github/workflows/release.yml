@@ -84,15 +84,29 @@ jobs:
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: scripts/validate-image.sh "$IMAGE@$DIGEST"
+      - name: Layer security and package inventory
+        if: steps.plan.outputs.build == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          timeout 15m python3 tests/test-image-layers.py "$IMAGE@$DIGEST"
+          docker run --rm "$IMAGE@$DIGEST" --exec bash -c '
+            cat /etc/apt/sources.list.d/debian.sources
+            dpkg-query -W
+            for file in /usr/bin/gh /usr/bin/rootlesskit /usr/libexec/docker/cli-plugins/docker-{buildx,compose}; do
+              dpkg-query -S "$file"
+            done
+            apt-cache policy libpq5 postgresql-17 postgresql-client-17 linux-libc-dev gh docker-ce-rootless-extras docker-buildx-plugin docker-compose-plugin
+          ' > package-inventory.txt
       - name: Vulnerability gate
         if: steps.plan.outputs.build == 'true'
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
           image-ref: ghcr.io/skulldorom/openhands-agent@${{ steps.build.outputs.digest }}
-          format: table
-          output: trivy.txt
+          format: json
+          output: trivy.json
           severity: HIGH,CRITICAL
-          ignore-unfixed: true
+          ignore-unfixed: false
           exit-code: '1'
           scanners: vuln,secret
           timeout: 15m
@@ -111,7 +125,8 @@ jobs:
           name: validation-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             state.json
-            trivy.txt
+            trivy.json
+            package-inventory.txt
           if-no-files-found: ignore
       - name: Failure summary
         if: failure()

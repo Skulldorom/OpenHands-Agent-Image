@@ -19,8 +19,23 @@ RUN test "$(. /etc/os-release; printf '%s' "$VERSION_CODENAME")" = trixie \
     && printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d \
     && mkdir -p /etc/postgresql-common \
     && printf 'create_main_cluster = false\n' > /etc/postgresql-common/createcluster.conf \
+    && printf '%s\n' \
+        'Types: deb' \
+        'URIs: https://deb.debian.org/debian' \
+        'Suites: trixie trixie-updates' \
+        'Components: main' \
+        'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+        '' \
+        'Types: deb' \
+        'URIs: https://security.debian.org/debian-security' \
+        'Suites: trixie-security' \
+        'Components: main' \
+        'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+        > /etc/apt/sources.list.d/debian.sources \
     && apt-get -o Acquire::Retries=3 update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends postgresql-17 postgresql-client-17 \
+    && rm -f /etc/ssl/private/ssl-cert-snakeoil.key /etc/ssl/certs/ssl-cert-snakeoil.pem \
     && test ! -d /var/lib/postgresql/17/main \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

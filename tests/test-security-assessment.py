@@ -36,6 +36,7 @@ class AssessmentTests(unittest.TestCase):
         self.assertFalse(result["pass"])
         self.assertEqual(len(result["findings"]), 2)
         self.assertEqual([row["cve"] for row in result["blockers"]], ["CVE-2026-0001"])
+        self.assertTrue(result["modification_pass"])
 
     def test_unfixed_inherited_high_is_inventory_only(self):
         vulnerability = self.vulnerability()
@@ -45,11 +46,13 @@ class AssessmentTests(unittest.TestCase):
         self.assertEqual(result["origin_counts"], {"inherited finding": 1})
         self.assertEqual(result["blockers"], [])
         self.assertTrue(result["pass"])
+        self.assertTrue(result["modification_pass"])
 
     def test_introduced_high_blocks_without_upstream_baseline(self):
         self.candidate["Results"][0]["Vulnerabilities"] = [self.vulnerability(cve="CVE-2026-0009")]
         result = self.run_assessment()
         self.assertEqual(result["findings"][0]["origin"], "new finding in inherited package")
+        self.assertFalse(result["modification_pass"])
         self.assertFalse(result["pass"])
 
     def test_added_package_high_blocks(self):

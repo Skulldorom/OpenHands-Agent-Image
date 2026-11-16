@@ -81,7 +81,10 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
                for result in candidate["Results"] for secret in result.get("Secrets", [])]
     blockers = [row for row in rows if row["blocking_reasons"]]
     removed = sorted({key(v) for _, _, v in findings(upstream)} - {key(v) for _, _, v in findings(candidate)})
-    return {"candidate": expected_candidate, "upstream": expected_upstream,
+    introduced = [row for row in rows if row["severity"] in {"HIGH", "CRITICAL"}
+                  and row["origin"] != "inherited finding"]
+    return {"modification_pass": not introduced and not secrets, "introduced_high_critical": introduced,
+            "candidate": expected_candidate, "upstream": expected_upstream,
             "policy_owner": policy["owner"], "policy_review_date": policy["review_date"],
             "severity_counts": dict(Counter(row["severity"] for row in rows)),
             "with_advertised_fix": sum(bool(row["fixed"]) for row in rows),
@@ -116,6 +119,7 @@ def main():
     parser = argparse.ArgumentParser()
     for name in ["candidate", "upstream", "policy", "tracker", "candidate-ref", "upstream-ref"]:
         parser.add_argument("--" + name, required=True)
+    parser.add_argument("--report-only", action="store_true")
     args = parser.parse_args()
     load = lambda name: json.loads(Path(name).read_text())
     assessment = assess(load(args.candidate), load(args.upstream), load(args.policy), load(args.tracker),
@@ -125,7 +129,7 @@ def main():
     Path("security-gate.json").write_text(json.dumps({k: assessment[k] for k in
         ["candidate", "upstream", "pass", "blockers", "secrets", "accepted_exceptions"]}, indent=2) + "\n")
     print(f"Security gate: {'PASS' if assessment['pass'] else 'BLOCKED'}, {len(assessment['blockers'])} vulnerability instances, {len(assessment['secrets'])} secrets")
-    return 0 if assessment["pass"] else 1
+    return 0 if args.report_only or assessment["pass"] else 1
 
 
 if __name__ == "__main__":

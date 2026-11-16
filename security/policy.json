@@ -9,5 +9,6 @@
     "CVE-2026-41567": "Buildx embeds affected Docker code; vulnerable-path unreachability has not been demonstrated.",
     "CVE-2026-42306": "Buildx embeds affected Docker code; vulnerable-path unreachability has not been demonstrated."
   },
-  "exceptions": []
+  "exceptions": [],
+  "release_approved": false
 }

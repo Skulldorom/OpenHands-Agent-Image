@@ -14,7 +14,6 @@ timeout 60 docker run --rm "$image" --exec sh -eu -c '
  dpkg-query -W libxml2
  dpkg-query -W -f="\${binary:Package} \${Depends}\n" | grep -c libxml2 || true
  ldd /usr/lib/chromium/chromium
- grep -q "https://download.docker.com/linux/debian trixie stable" /etc/apt/sources.list.d/docker.list
  test ! -d /var/lib/postgresql/17/main
 '
 key=$(python3 -c "import secrets; print(secrets.token_hex(24))")

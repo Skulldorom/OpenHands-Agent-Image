@@ -2,6 +2,8 @@
 """Resolve upstream contracts and plan/promote only validated registry artifacts."""
 import hashlib
 import json
+import io
+import zipfile
 import os
 from pathlib import Path
 import re
@@ -45,6 +47,32 @@ def fingerprint():
     return h.hexdigest()
 
 
+def reusable_blocker(state, gate, functional, current, upstream):
+    return (state["fingerprint"] == current and state["upstream_digest"] == upstream
+            and functional["pass"] and functional["candidate"] == gate["candidate"]
+            and gate["upstream"] == "ghcr.io/openhands/agent-server@" + upstream
+            and not gate["pass"] and bool(gate["blockers"]))
+
+def previous_blocked_attempt(current, upstream):
+    runs = json.loads(gh("api", f"repos/{REPO}/actions/runs?branch=main&status=completed&per_page=50"))
+    for run in runs["workflow_runs"]:
+        if run["name"] not in {"CI", "Daily upstream update"}:
+            continue
+        artifacts = json.loads(gh("api", f"repos/{REPO}/actions/runs/{run['id']}/artifacts"))
+        for artifact in artifacts["artifacts"]:
+            if artifact["expired"] or not artifact["name"].startswith("validation-"):
+                continue
+            raw = subprocess.check_output(["gh", "api", f"repos/{REPO}/actions/artifacts/{artifact['id']}/zip"])
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                if not {"state.json", "security-gate.json", "functional-pass.json"} <= set(archive.namelist()):
+                    continue
+                state = json.loads(archive.read("state.json"))
+                gate = json.loads(archive.read("security-gate.json"))
+                functional = json.loads(archive.read("functional-pass.json"))
+                if reusable_blocker(state, gate, functional, current, upstream):
+                    return run["html_url"]
+    return None
+
 def plan():
     policy = json.loads(Path("compatibility.json").read_text())
     upstream, config = registry("openhands/agent-server", "latest-python")
@@ -68,6 +96,7 @@ def plan():
         assert "404" in result.stderr, result.stderr
     current = fingerprint()
     changed = not old or old["fingerprint"] != current or old["upstream_digest"] != upstream
+    blocked = previous_blocked_attempt(current, upstream) if changed else None
     bump = os.environ.get("BUMP", "auto")
     messages = ""
     if old:
@@ -82,11 +111,12 @@ def plan():
     state = {"version": release_version, "upstream_digest": upstream, "upstream_source": sha, "agent_server_version": version, "fingerprint": current, "commit": os.environ["GITHUB_SHA"]}
     Path("state.json").write_text(json.dumps(state, indent=2) + "\n")
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-        for key, value in {"build": str(changed or os.environ.get("BUMP", "auto") != "auto").lower(), "version": release_version, "upstream": upstream}.items():
+        for key, value in {"build": str(not blocked and (changed or os.environ.get("BUMP", "auto") != "auto")).lower(), "version": release_version, "upstream": upstream, "blocked": blocked or ""}.items():
             output.write(f"{key}={value}\n")
 
 
 def publish(digest):
+    assert json.loads(Path("security/policy.json").read_text())["release_approved"] is True, "Owner release approval missing"
     assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
     state = json.loads(Path("state.json").read_text())
     assessment = json.loads(Path("security-assessment.json").read_text())

@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     permissions:
+      actions: read
       contents: write
       packages: write
     env:
@@ -35,6 +36,7 @@ jobs:
           python3 tests/test-init-local.py
           python3 tests/test-security-assessment.py
           python3 tests/test-blocker-explain.py
+          python3 tests/test-release-evidence.py
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Inspect upstream contract and plan version
         id: plan
@@ -43,7 +45,14 @@ jobs:
         run: python3 scripts/release.py plan
       - name: Skip unchanged image
         if: steps.plan.outputs.build != 'true'
-        run: echo 'Upstream and build inputs unchanged; no release.' >> "$GITHUB_STEP_SUMMARY"
+        env:
+          BLOCKED: ${{ steps.plan.outputs.blocked }}
+        run: |
+          if [ -n "$BLOCKED" ]; then
+            echo "BLOCKED — AWAITING UPSTREAM FIX. Reusing evidence: $BLOCKED; no rebuild or release." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo 'Upstream and build inputs unchanged; no release.' >> "$GITHUB_STEP_SUMMARY"
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         if: steps.plan.outputs.build == 'true'
         with:
@@ -85,7 +94,10 @@ jobs:
         if: steps.plan.outputs.build == 'true'
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: scripts/validate-image.sh "$IMAGE@$DIGEST"
+        run: |
+          scripts/validate-image.sh "$IMAGE@$DIGEST"
+          printf '{"pass":true,"candidate":"%s@%s"}\n' "$IMAGE" "$DIGEST" > functional-pass.json
+          echo '## Functional validation: PASS (Git commits, PostgreSQL backup/restore, API, entrypoint and signals, metadata)' >> "$GITHUB_STEP_SUMMARY"
       - name: Layer security and package inventory
         if: steps.plan.outputs.build == 'true'
         env:
@@ -132,7 +144,7 @@ jobs:
           curl --fail --show-error --silent --retry 3 --max-time 120 \
             https://security-tracker.debian.org/tracker/data/json > debian-tracker.json
           sha256sum --check scanner-database.sha256
-      - name: Independent release risk and zero-secret gate
+      - name: Full security assessment (no suppressions)
         if: steps.plan.outputs.build == 'true'
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
@@ -140,7 +152,16 @@ jobs:
         run: |
           python3 scripts/security-assessment.py --candidate trivy.json --upstream upstream-trivy.json \
             --policy security/policy.json --tracker debian-tracker.json \
-            --candidate-ref "$IMAGE@$DIGEST" --upstream-ref "ghcr.io/openhands/agent-server@$UPSTREAM"
+            --candidate-ref "$IMAGE@$DIGEST" --upstream-ref "ghcr.io/openhands/agent-server@$UPSTREAM" --report-only
+          python3 -c 'import json,os; d=json.load(open("security-assessment.json")); f=open(os.environ["GITHUB_STEP_SUMMARY"],"a"); f.write("\n## Modification security: " + ("PASS" if d["modification_pass"] else "FAIL") + "\nIntroduced HIGH/CRITICAL: " + str(len(d["introduced_high_critical"])) + "; detected secrets: " + str(len(d["secrets"])) + "\nInherited and other origins: " + str(d["origin_counts"]) + "\n")'
+      - name: Modification security gate (introduced HIGH/CRITICAL and all secrets)
+        if: steps.plan.outputs.build == 'true'
+        run: |
+          python3 -c 'import json; assert json.load(open("security-assessment.json"))["modification_pass"], "Introduced risk or secrets detected"'
+      - name: Strict release policy and owner approval
+        if: "!cancelled() && steps.plan.outputs.build == 'true' && hashFiles('security-assessment.json') != ''"
+        run: |
+          python3 -c 'import json,os; d=json.load(open("security-assessment.json")); p=json.load(open("security/policy.json")); open(os.environ["GITHUB_STEP_SUMMARY"],"a").write("\n## Release eligibility: " + ("PASS" if d["pass"] and p["release_approved"] else "BLOCKED") + "; strict policy blockers: " + str(len(d["blockers"])) + "; owner approval: " + str(p["release_approved"]) + "\n"); assert d["pass"] and p["release_approved"], "Release policy or owner approval blocks publication"'
       - name: Explain blockers and remediation verdicts
         if: failure()
         continue-on-error: true
@@ -158,8 +179,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 90
           name: validation-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
+            functional-pass.json
             state.json
             trivy.json
             package-inventory.txt

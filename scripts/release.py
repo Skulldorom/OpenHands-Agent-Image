@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Resolve upstream contracts and plan/promote only validated registry artifacts."""
 import hashlib
+import importlib.util
 import json
 import io
 import zipfile
@@ -115,14 +116,30 @@ def plan():
             output.write(f"{key}={value}\n")
 
 
+def validate_publication_evidence(state, assessment, functional, policy, digest):
+    assert policy["release_approved"] is True, "Owner release approval missing"
+    assert functional["pass"] is True and functional["candidate"] == IMAGE + "@" + digest, "Missing functional pass for exact candidate"
+    assert assessment["policy_sha256"] == hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest(), "Assessment policy changed"
+    assert assessment["pass"] and assessment["modification_pass"], "Security gate not passed"
+    assert not assessment["blockers"] and not assessment["secrets"] and not assessment["introduced_high_critical"]
+    assert assessment["candidate"] == IMAGE + "@" + digest, "Assessment is for another candidate"
+    assert assessment["upstream"] == "ghcr.io/openhands/agent-server@" + state["upstream_digest"]
+    # Recheck expiry at promotion, not only when the scan was assessed.
+    spec = importlib.util.spec_from_file_location("assessment", "scripts/security-assessment.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.validate_exceptions(policy["exceptions"], module.date.today())
+    assert module.date.fromisoformat(policy["review_date"]) >= module.date.today(), "Security policy review overdue"
+    assert all(r["approved_by"] in policy["acceptance_approvers"] for r in policy["exceptions"]), "Unauthorized acceptance owner"
+
+
 def publish(digest):
     assert json.loads(Path("security/policy.json").read_text())["release_approved"] is True, "Owner release approval missing"
     assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
     state = json.loads(Path("state.json").read_text())
     assessment = json.loads(Path("security-assessment.json").read_text())
-    assert assessment["pass"] and not assessment["blockers"] and not assessment["secrets"], "Security gate not passed"
-    assert assessment["candidate"] == IMAGE + "@" + digest, "Assessment is for another candidate"
-    assert assessment["upstream"] == "ghcr.io/openhands/agent-server@" + state["upstream_digest"]
+    validate_publication_evidence(state, assessment, json.loads(Path("functional-pass.json").read_text()),
+                                  json.loads(Path("security/policy.json").read_text()), digest)
     state["image_digest"] = digest
     version = state["version"]
     immutable = [version, "sha-" + state["commit"]]
@@ -153,7 +170,7 @@ Full state and build fingerprint are attached in state.json. Previous versions r
 _This release was created by an AI-authored OpenHands workflow on behalf of the repository owner._
 """
     Path("release-notes.txt").write_text(notes)
-    subprocess.run(["gh", "release", "create", "v" + version, "--target", state["commit"], "--title", "v" + version, "--notes-file", "release-notes.txt", "state.json", "security-assessment.md", "security-assessment.json", "security-gate.json", "trivy.json", "upstream-trivy.json", "scanner-version.json", "scanner-database.sha256"], check=True)
+    subprocess.run(["gh", "release", "create", "v" + version, "--target", state["commit"], "--title", "v" + version, "--notes-file", "release-notes.txt", "state.json", "security-assessment.md", "security-assessment.json", "security-gate.json", "trivy.json", "upstream-trivy.json", "scanner-version.json", "scanner-database.sha256", "functional-pass.json", "package-inventory.txt", "debian-tracker.json", "security/policy.json"], check=True)
     subprocess.run(["docker", "buildx", "imagetools", "create", "--prefer-index=false", "--tag", IMAGE + ":latest", IMAGE + "@" + digest], check=True)
 
 

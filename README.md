@@ -183,3 +183,11 @@ for f in scripts/*.sh tests/*.sh; do bash -n "$f"; done
 docker build -t openhands-agent:test .
 scripts/validate-image.sh openhands-agent:test
 ```
+
+## Controlled risk-acceptance proposal — not activated
+
+The image remains official Agent Server 1.62.0 plus runtime Git identity and PostgreSQL 17. Functional readiness differs from security approval. Seven inherited findings are proposed in [security/proposed-acceptances.json](security/proposed-acceptances.json): libxml2, GitHub CLI, rootlesskit, Compose and three Buildx findings. **None are approved or active.** Accepted vulnerabilities would remain risks, not fixed or harmless findings.
+
+Proposed expiry: **2026-12-16**. Exact CVE, package version, scanner target/type, upstream digest and candidate digest are pinned. Actual owner/date approval is pending. The owner must approve the justification and workload controls in every record. Changed versions, binaries, digests, expiry and new findings require reassessment. Introduced HIGH/CRITICAL findings and detected secrets always block. Complete unsuppressed inventory and acceptance records accompany releases. See [approval procedure](SECURITY.md#proposed-scoped-inherited-risk-acceptance-inactive).
+
+Active `exceptions` remains empty and `release_approved` remains false. Nothing is published, promoted or deployed by this proposal. Production image digest was not inspected; the upstream baseline must not be assumed identical to the LXC deployment. Existing CI proves Git/PostgreSQL/API/signal functionality for the recorded candidate, not all host behavior. Fresh security scans and explicit approvals remain required before release; retained scans are historical evidence, not today's vulnerability-database result.

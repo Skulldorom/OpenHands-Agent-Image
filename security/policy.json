@@ -10,5 +10,8 @@
     "CVE-2026-42306": "Buildx embeds affected Docker code; vulnerable-path unreachability has not been demonstrated."
   },
   "exceptions": [],
-  "release_approved": false
+  "release_approved": false,
+  "acceptance_approvers": [
+    "Skulldorom"
+  ]
 }

@@ -1,0 +1,46 @@
+name: Policy proposal review
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  policy:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Syntax, ShellCheck and policy tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+          for script in scripts/*.sh tests/*.sh; do bash -n "$script"; done
+          shellcheck scripts/*.sh tests/*.sh
+          python3 -m py_compile scripts/*.py tests/*.py
+          python3 tests/test-init-local.py
+          python3 tests/test-security-assessment.py
+          python3 tests/test-blocker-explain.py
+          python3 tests/test-release-evidence.py
+      - name: Reassess retained exact-artifact evidence without building or publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/Skulldorom/OpenHands-Agent-Image/actions/artifacts/14231220500/zip > /tmp/evidence.zip
+          python3 tests/test-proposed-evidence.py /tmp/evidence.zip | tee proposal-validation.json
+          echo 'Proposal only: active policy still blocks publication. No approval granted.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve full reassessments
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: inactive-policy-review
+          path: |
+            active-policy.json
+            active-policy.md
+            hypothetical-approval.json
+            hypothetical-approval.md
+            proposal-validation.json

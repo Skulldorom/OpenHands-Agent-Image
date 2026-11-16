@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Compare unsuppressed scans and write a separate fail-closed release decision."""
 import argparse
+import hashlib
 from collections import Counter, defaultdict
 from datetime import date
 import json
+import re
 from pathlib import Path
 import sys
 
@@ -27,6 +29,38 @@ def scope(result):
 def identity(result, vulnerability):
     return scope(result), result.get("Class"), result.get("Type"), *key(vulnerability)
 
+def validate_exceptions(records, today):
+    seen = set()
+    required = {"id", "cve", "package", "installed", "target", "result_class", "result_type",
+                "upstream_digest", "candidate_digest", "justification", "compensating_controls",
+                "approved_by", "approval_date", "expires", "status"}
+    for record in records:
+        assert set(record) == required, "Invalid acceptance schema"
+        assert all(isinstance(record[k], str) and record[k].strip() for k in required), "Empty acceptance field"
+        assert not any("*" in record[k] for k in required), "Wildcards are forbidden"
+        assert record["status"] == "approved", "Acceptance not explicitly approved"
+        assert record["id"] not in seen, "Duplicate acceptance ID"
+        seen.add(record["id"])
+        assert re.fullmatch(r"CVE-\d{4}-\d{4,}", record["cve"]), "Invalid CVE"
+        for field in ("upstream_digest", "candidate_digest"):
+            assert re.fullmatch(r"sha256:[0-9a-f]{64}", record[field]), "Invalid acceptance digest"
+        assert date.fromisoformat(record["approval_date"]) <= today <= date.fromisoformat(record["expires"]), "Acceptance expired or not yet valid"
+
+
+def accepted_record(row, result, records, candidate_ref, upstream_ref):
+    # A CVE in another version or binary is never evidence of inheritance.
+    if row["origin"] != "inherited finding" or row["installed"] not in row["upstream_installed"]:
+        return None
+    for record in records:
+        if (record["cve"] == row["cve"] and record["package"] == row["package"]
+                and record["installed"] == row["installed"] and record["target"] == row["target"]
+                and record["result_class"] == result.get("Class") and record["result_type"] == result.get("Type")
+                and candidate_ref == "ghcr.io/skulldorom/openhands-agent@" + record["candidate_digest"]
+                and upstream_ref == "ghcr.io/openhands/agent-server@" + record["upstream_digest"]):
+            return record
+    return None
+
+
 def assess(candidate, upstream, policy, tracker, expected_candidate, expected_upstream):
     assert candidate["ArtifactName"] == expected_candidate, "Candidate digest mismatch"
     assert upstream["ArtifactName"] == expected_upstream, "Upstream digest mismatch"
@@ -35,8 +69,8 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
     assert candidate["Metadata"]["OS"]["Name"].startswith("13"), "Unreviewed Debian release"
     assert policy["block_all_critical"] is True
     assert date.fromisoformat(policy["review_date"]) >= date.today(), "Security policy review overdue"
-    # Exceptions require a separate code review of matching semantics before activation.
-    assert policy["exceptions"] == [], "No exception mechanism approved; fail closed"
+    validate_exceptions(policy["exceptions"], date.today())
+    assert all(record["approved_by"] in policy["acceptance_approvers"] for record in policy["exceptions"]), "Unauthorized acceptance owner"
     old = defaultdict(list)
     for result, package, vulnerability in findings(upstream):
         old[identity(result, vulnerability)].append(vulnerability)
@@ -45,8 +79,10 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
         for result in upstream["Results"] for package in result.get("Packages", [])
     }
     rows = []
+    accepted = []
     for result, package, vulnerability in findings(candidate):
-        inherited = old.get(identity(result, vulnerability), [])
+        inherited = [v for v in old.get(identity(result, vulnerability), [])
+                     if v["InstalledVersion"] == vulnerability["InstalledVersion"]]
         source = package.get("SrcName", vulnerability["PkgName"])
         vendor = tracker.get(source, {}).get(vulnerability["VulnerabilityID"], {})
         release = vendor.get("releases", {}).get("trixie", {})
@@ -65,7 +101,7 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
                 reasons.append("fixed version advertised; supported package/binary remediation must be verified")
             if vulnerability["VulnerabilityID"] in policy["high_risk_cves"]:
                 reasons.append(policy["high_risk_cves"][vulnerability["VulnerabilityID"]])
-        rows.append({
+        row = {
             "package": vulnerability["PkgName"], "source_package": source,
             "cve": vulnerability["VulnerabilityID"], "severity": severity,
             "installed": vulnerability["InstalledVersion"], "fixed": vulnerability.get("FixedVersion", ""),
@@ -76,22 +112,28 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
             "references": vulnerability.get("References", []), "cvss": vulnerability.get("CVSS", {}),
             "blocking_reasons": reasons,
             "exposure": "Potentially reachable in arbitrary agent workloads; no negative reachability or exploitability claim.",
-        })
+        }
+        record = accepted_record(row, result, policy["exceptions"], expected_candidate, expected_upstream)
+        row["accepted_exception"] = record["id"] if record and reasons else None
+        if row["accepted_exception"]:
+            accepted.append(record)
+        rows.append(row)
     secrets = [dict(target=result["Target"], rule=secret.get("RuleID"), title=secret.get("Title"))
                for result in candidate["Results"] for secret in result.get("Secrets", [])]
-    blockers = [row for row in rows if row["blocking_reasons"]]
+    blockers = [row for row in rows if row["blocking_reasons"] and not row["accepted_exception"]]
     removed = sorted({key(v) for _, _, v in findings(upstream)} - {key(v) for _, _, v in findings(candidate)})
     introduced = [row for row in rows if row["severity"] in {"HIGH", "CRITICAL"}
                   and row["origin"] != "inherited finding"]
     return {"modification_pass": not introduced and not secrets, "introduced_high_critical": introduced,
             "candidate": expected_candidate, "upstream": expected_upstream,
+            "policy_sha256": hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest(),
             "policy_owner": policy["owner"], "policy_review_date": policy["review_date"],
             "severity_counts": dict(Counter(row["severity"] for row in rows)),
             "with_advertised_fix": sum(bool(row["fixed"]) for row in rows),
             "without_advertised_fix": sum(not row["fixed"] for row in rows),
             "origin_counts": dict(Counter(row["origin"] for row in rows)),
             "removed_package_cves": removed, "findings": rows, "secrets": secrets,
-            "blockers": blockers, "accepted_exceptions": [], "pass": not blockers and not secrets}
+            "blockers": blockers, "accepted_exceptions": accepted, "pass": not blockers and not secrets and not introduced}
 
 
 def markdown(assessment):
@@ -101,15 +143,19 @@ def markdown(assessment):
              f"All-severity inventory: {assessment['severity_counts']}.",
              f"Advertised fix: {assessment['with_advertised_fix']}; no advertised fix: {assessment['without_advertised_fix']}.",
              f"Origins: {assessment['origin_counts']}.",
-             "Accepted exceptions: none. Unfixed does not mean safe. Module fixes do not guarantee supported binary fixes.", "",
+             f"Accepted exceptions: {len(assessment['accepted_exceptions'])}. Accepted does not mean fixed or harmless.",
+             "Unfixed does not mean safe. Module fixes do not guarantee supported binary fixes.", "",
              "## Findings grouped by package and CVE", "",
-             "Package | CVE | Severity | Installed | Advertised fix | Debian trixie | Origin | Gate",
-             "--- | --- | --- | --- | --- | --- | --- | ---"]
+             "Package | Target | CVE | Severity | Installed | Advertised fix | Debian trixie | Origin | Gate",
+             "--- | --- | --- | --- | --- | --- | --- | --- | ---"]
     for row in sorted(assessment["findings"], key=lambda r: (r["package"], r["cve"], r["target"])):
-        values = [row["package"], row["cve"], row["severity"], row["installed"], row["fixed"] or "none",
+        values = [row["package"], row["target"], row["cve"], row["severity"], row["installed"], row["fixed"] or "none",
                   json.dumps(row["vendor_trixie"], sort_keys=True), row["origin"],
-                  "; ".join(row["blocking_reasons"]) or "inventory; no supported fix advertised"]
+                  ("ACCEPTED " + row["accepted_exception"] + ": " if row["accepted_exception"] else "")
+                  + ("; ".join(row["blocking_reasons"]) or "inventory; no supported fix advertised")]
         lines.append(" | ".join(str(value).replace("|", "\\|").replace("\n", " ") for value in values))
+    lines += ["", "## Exact approved risk records", "",
+              "```json", json.dumps(assessment["accepted_exceptions"], indent=2), "```", ""]
     lines += ["", "## Removed upstream package/CVE pairs", "", *[f"- {p}: {c}" for p, c in assessment["removed_package_cves"]],
               "", "Reports are generated by an AI-authored OpenHands workflow on behalf of the repository owner."]
     return "\n".join(lines) + "\n"

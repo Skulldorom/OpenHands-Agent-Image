@@ -29,11 +29,17 @@ def scope(result):
 def identity(result, vulnerability):
     return scope(result), result.get("Class"), result.get("Type"), *key(vulnerability)
 
+def metadata_hash(vulnerability):
+    fields = {k: vulnerability.get(k) for k in ("Severity", "FixedVersion", "Status", "CVSS", "References", "Title", "Description", "SeveritySource", "DataSource")}
+    return hashlib.sha256(json.dumps(fields, sort_keys=True).encode()).hexdigest()
+
+
 def validate_exceptions(records, today):
     seen = set()
+    scopes = set()
     required = {"id", "cve", "package", "installed", "target", "result_class", "result_type",
                 "upstream_digest", "candidate_digest", "justification", "compensating_controls",
-                "approved_by", "approval_date", "expires", "status"}
+                "approved_by", "approval_date", "expires", "status", "metadata_sha256"}
     for record in records:
         assert set(record) == required, "Invalid acceptance schema"
         assert all(isinstance(record[k], str) and record[k].strip() for k in required), "Empty acceptance field"
@@ -41,6 +47,10 @@ def validate_exceptions(records, today):
         assert record["status"] == "approved", "Acceptance not explicitly approved"
         assert record["id"] not in seen, "Duplicate acceptance ID"
         seen.add(record["id"])
+        exact = tuple(record[k] for k in ("cve", "package", "installed", "target", "result_class", "result_type", "upstream_digest", "candidate_digest"))
+        assert exact not in scopes, "Duplicate acceptance scope"
+        scopes.add(exact)
+        assert re.fullmatch(r"[a-f0-9]{64}", record["metadata_sha256"]), "Invalid metadata fingerprint"
         assert re.fullmatch(r"CVE-\d{4}-\d{4,}", record["cve"]), "Invalid CVE"
         for field in ("upstream_digest", "candidate_digest"):
             assert re.fullmatch(r"sha256:[0-9a-f]{64}", record[field]), "Invalid acceptance digest"
@@ -53,6 +63,7 @@ def accepted_record(row, result, records, candidate_ref, upstream_ref):
         return None
     for record in records:
         if (record["cve"] == row["cve"] and record["package"] == row["package"]
+                and record["metadata_sha256"] == row["metadata_sha256"]
                 and record["installed"] == row["installed"] and record["target"] == row["target"]
                 and record["result_class"] == result.get("Class") and record["result_type"] == result.get("Type")
                 and candidate_ref == "ghcr.io/skulldorom/openhands-agent@" + record["candidate_digest"]
@@ -61,7 +72,26 @@ def accepted_record(row, result, records, candidate_ref, upstream_ref):
     return None
 
 
+def validate_scan(report, expected):
+    assert report["ArtifactName"] == expected, "Scan artifact mismatch"
+    assert report.get("SchemaVersion") == 2 and report.get("ArtifactType") == "container_image", "Unsupported scan schema"
+    assert report["Metadata"]["OS"]["Family"] == "debian" and report["Metadata"]["OS"]["Name"].startswith("13"), "Unsupported OS"
+    assert isinstance(report.get("Results"), list) and report["Results"], "Empty scan"
+    assert any(r.get("Class") == "os-pkgs" and r.get("Type") == "debian" and r.get("Packages") for r in report["Results"]), "Missing OS inventory"
+    for result in report["Results"]:
+        assert isinstance(result.get("Target"), str) and result["Target"]
+        assert not result.get("Misconfigurations") and not result.get("MisconfSummary"), "Unexpected scan format"
+        assert not result.get("SuppressedFindings"), "Suppressed scanner findings forbidden"
+        for vulnerability in result.get("Vulnerabilities", []):
+            for field in ("PkgName", "VulnerabilityID", "InstalledVersion", "Severity"):
+                assert isinstance(vulnerability.get(field), str) and vulnerability[field], "Malformed vulnerability"
+            assert vulnerability["Severity"] in {"UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"}, "Unsupported severity"
+        assert isinstance(result.get("Secrets", []), list), "Malformed secrets inventory"
+
+
 def assess(candidate, upstream, policy, tracker, expected_candidate, expected_upstream):
+    validate_scan(candidate, expected_candidate)
+    validate_scan(upstream, expected_upstream)
     assert candidate["ArtifactName"] == expected_candidate, "Candidate digest mismatch"
     assert upstream["ArtifactName"] == expected_upstream, "Upstream digest mismatch"
     assert candidate.get("Results") and upstream.get("Results"), "Empty scan"
@@ -80,6 +110,7 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
     }
     rows = []
     accepted = []
+    consumed = set()
     for result, package, vulnerability in findings(candidate):
         inherited = [v for v in old.get(identity(result, vulnerability), [])
                      if v["InstalledVersion"] == vulnerability["InstalledVersion"]]
@@ -103,6 +134,7 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
                 reasons.append(policy["high_risk_cves"][vulnerability["VulnerabilityID"]])
         row = {
             "package": vulnerability["PkgName"], "source_package": source,
+            "metadata_sha256": metadata_hash(vulnerability),
             "cve": vulnerability["VulnerabilityID"], "severity": severity,
             "installed": vulnerability["InstalledVersion"], "fixed": vulnerability.get("FixedVersion", ""),
             "status": vulnerability.get("Status", "unknown"), "target": result["Target"],
@@ -116,8 +148,11 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
         record = accepted_record(row, result, policy["exceptions"], expected_candidate, expected_upstream)
         row["accepted_exception"] = record["id"] if record and reasons else None
         if row["accepted_exception"]:
+            assert record["id"] not in consumed, "Acceptance reused for multiple findings"
+            consumed.add(record["id"])
             accepted.append(record)
         rows.append(row)
+    assert consumed == {r["id"] for r in policy["exceptions"]}, "Unused acceptance scope requires policy review"
     secrets = [dict(target=result["Target"], rule=secret.get("RuleID"), title=secret.get("Title"))
                for result in candidate["Results"] for secret in result.get("Secrets", [])]
     blockers = [row for row in rows if row["blocking_reasons"] and not row["accepted_exception"]]

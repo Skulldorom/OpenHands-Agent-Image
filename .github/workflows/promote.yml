@@ -1,0 +1,168 @@
+name: Promote exact validated candidate
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Exact immutable sha256 candidate digest (never a tag)
+        required: true
+        type: string
+      evidence_run:
+        description: Trusted main build run ID
+        required: true
+        type: string
+      evidence_attempt:
+        description: Trusted build run attempt
+        required: true
+        type: string
+      bump:
+        description: Release increment (initial release is always 1.0.0)
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+permissions:
+  contents: read
+concurrency:
+  group: ghcr-main-release
+  cancel-in-progress: false
+env:
+  IMAGE: ghcr.io/skulldorom/openhands-agent
+  CANDIDATE_DIGEST: ${{ inputs.candidate }}
+  EVIDENCE_RUN: ${{ inputs.evidence_run }}
+  EVIDENCE_ATTEMPT: ${{ inputs.evidence_attempt }}
+  BUMP: ${{ inputs.bump }}
+jobs:
+  assess:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      bundle_digest: ${{ steps.bundle.outputs.artifact-digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify candidate provenance and trusted functional evidence
+        id: prepare
+        run: python3 scripts/promotion.py prepare
+      - name: Verify actual image metadata
+        env:
+          UPSTREAM: ${{ steps.prepare.outputs.upstream }}
+        run: |
+          docker pull "$IMAGE@$CANDIDATE_DIGEST"
+          test "$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE@$CANDIDATE_DIGEST")" = "$(jq -r .commit state.json)"
+          test "$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.base.digest" }}' "$IMAGE@$CANDIDATE_DIGEST")" = "$UPSTREAM"
+          test "$(docker inspect -f '{{ index .Config.Labels "io.openhands.agent-server.version" }}' "$IMAGE@$CANDIDATE_DIGEST")" = "$(jq -r .agent_server_version compatibility.json)"
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.69.3
+          cache: true
+      - name: Freeze scanner database
+        run: |
+          trivy image --cache-dir .cache/trivy --download-db-only
+          sha256sum .cache/trivy/db/trivy.db | tee scanner-database.sha256
+          trivy version --format json > scanner-version.json
+      - name: Complete unsuppressed candidate inventory
+        env:
+          DIGEST: ${{ inputs.candidate }}
+        run: |
+          trivy image --cache-dir .cache/trivy --skip-db-update --skip-java-db-update \
+            --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
+            --ignorefile /dev/null --ignore-unfixed=false --list-all-pkgs --format json --output trivy.json \
+            --timeout 15m "$IMAGE@$DIGEST"
+      - name: Scan exact upstream with the same Trivy database
+        env:
+          UPSTREAM: ${{ steps.prepare.outputs.upstream }}
+        run: |
+          trivy image --cache-dir .cache/trivy --skip-db-update --skip-java-db-update \
+            --scanners vuln --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL --ignorefile /dev/null --ignore-unfixed=false \
+            --list-all-pkgs --format json --output upstream-trivy.json --timeout 15m \
+            "ghcr.io/openhands/agent-server@$UPSTREAM"
+          curl --fail --show-error --silent --retry 3 --max-time 120 \
+            https://security-tracker.debian.org/tracker/data/json > debian-tracker.json
+          sha256sum --check scanner-database.sha256
+      - name: Full security assessment (no suppressions)
+        env:
+          DIGEST: ${{ inputs.candidate }}
+          UPSTREAM: ${{ steps.prepare.outputs.upstream }}
+        run: |
+          python3 scripts/security-assessment.py --candidate trivy.json --upstream upstream-trivy.json \
+            --policy security/policy.json --tracker debian-tracker.json \
+            --candidate-ref "$IMAGE@$DIGEST" --upstream-ref "ghcr.io/openhands/agent-server@$UPSTREAM" --report-only
+          python3 -c 'import json,os; d=json.load(open("security-assessment.json")); f=open(os.environ["GITHUB_STEP_SUMMARY"],"a"); f.write("\n## Modification security: " + ("PASS" if d["modification_pass"] else "FAIL") + "\nIntroduced HIGH/CRITICAL: " + str(len(d["introduced_high_critical"])) + "; detected secrets: " + str(len(d["secrets"])) + "\nInherited and other origins: " + str(d["origin_counts"]) + "\n")'
+      - name: Seal exact candidate and policy for owner review
+        run: |
+          python3 -c 'import json; assert json.load(open("security-assessment.json"))["pass"]; assert json.load(open("security/policy.json"))["release_approved"] is True'
+          python3 scripts/promotion.py seal
+          cat approval-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: bundle
+        with:
+          name: promotion-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            selection.json
+            approval-summary.md
+            state.json
+            functional-pass.json
+            trivy.json
+            upstream-trivy.json
+            debian-tracker.json
+            scanner-version.json
+            scanner-database.sha256
+            package-inventory.txt
+            security-assessment.json
+            security-assessment.md
+            security-gate.json
+      - name: Preserve failed assessment diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: failed-promotion-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          path: |
+            trivy.json
+            upstream-trivy.json
+            security-assessment.json
+            security-assessment.md
+            scanner-version.json
+            scanner-database.sha256
+  publish:
+    needs: assess
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: release
+      url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      packages: write
+      actions: read
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BUNDLE_DIGEST: ${{ needs.assess.outputs.bundle_digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Retrieve exact same-run approval bundle with verified archive digest
+        run: python3 scripts/promotion.py bundle
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Recheck authorization, policy, provenance, expiry and security then promote
+        run: python3 scripts/promotion.py publish

@@ -16,7 +16,8 @@
       "approved_by": "PENDING owner approval",
       "approval_date": "PENDING",
       "expires": "2026-12-16",
-      "status": "proposed"
+      "status": "proposed",
+      "metadata_sha256": "2810dc35f4665779b06ba94aa801379d127cf4e0fa206fc922140bd1352778aa"
     },
     {
       "id": "inherited-v1-2026-02",
@@ -33,7 +34,8 @@
       "approved_by": "PENDING owner approval",
       "approval_date": "PENDING",
       "expires": "2026-12-16",
-      "status": "proposed"
+      "status": "proposed",
+      "metadata_sha256": "6a3fd5ad74a29e174ba7a806d0dba7a13f823f1a0cff2570b7dc97ea0b3c143a"
     },
     {
       "id": "inherited-v1-2026-03",
@@ -50,7 +52,8 @@
       "approved_by": "PENDING owner approval",
       "approval_date": "PENDING",
       "expires": "2026-12-16",
-      "status": "proposed"
+      "status": "proposed",
+      "metadata_sha256": "6a3fd5ad74a29e174ba7a806d0dba7a13f823f1a0cff2570b7dc97ea0b3c143a"
     },
     {
       "id": "inherited-v1-2026-04",
@@ -67,7 +70,8 @@
       "approved_by": "PENDING owner approval",
       "approval_date": "PENDING",
       "expires": "2026-12-16",
-      "status": "proposed"
+      "status": "proposed",
+      "metadata_sha256": "98edff72df7f6254dba191730dc4d39fc613c435045d4b56190d87b529087904"
     },
     {
       "id": "inherited-v1-2026-05",
@@ -84,7 +88,8 @@
       "approved_by": "PENDING owner approval",
       "approval_date": "PENDING",
       "expires": "2026-12-16",
-      "status": "proposed"
+      "status": "proposed",
+      "metadata_sha256": "e936625c9d5c976bae3c39c5f57f6de796a80c1867a500d0b0d37b2eb4067906"
     },
     {
       "id": "inherited-v1-2026-06",
@@ -101,7 +106,8 @@
       "approved_by": "PENDING owner approval",
       "approval_date": "PENDING",
       "expires": "2026-12-16",
-      "status": "proposed"
+      "status": "proposed",
+      "metadata_sha256": "006ac7c9a8599b62a0485296726ffb9b7fee1cf8ef65a6da41c4ccf4eba815f8"
     },
     {
       "id": "inherited-v1-2026-07",
@@ -118,7 +124,8 @@
       "approved_by": "PENDING owner approval",
       "approval_date": "PENDING",
       "expires": "2026-12-16",
-      "status": "proposed"
+      "status": "proposed",
+      "metadata_sha256": "6a3fd5ad74a29e174ba7a806d0dba7a13f823f1a0cff2570b7dc97ea0b3c143a"
     }
   ]
 }

@@ -21,17 +21,24 @@ jobs:
           sudo apt-get install -y shellcheck
           for script in scripts/*.sh tests/*.sh; do bash -n "$script"; done
           shellcheck scripts/*.sh tests/*.sh
+          python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
           python3 -m py_compile scripts/*.py tests/*.py
           python3 tests/test-init-local.py
           python3 tests/test-security-assessment.py
           python3 tests/test-blocker-explain.py
           python3 tests/test-release-evidence.py
+          python3 tests/test-release-planning.py
+          python3 tests/test-provenance.py
+          python3 tests/test-workflow-policy.py
       - name: Reassess retained exact-artifact evidence without building or publishing
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api repos/Skulldorom/OpenHands-Agent-Image/actions/artifacts/14231220500/zip > /tmp/evidence.zip
-          python3 tests/test-proposed-evidence.py /tmp/evidence.zip | tee proposal-validation.json
+          export EVIDENCE_RUN=$(jq -r .run_id security/historical-evidence.json)
+          export EVIDENCE_ATTEMPT=$(jq -r .attempt security/historical-evidence.json)
+          export CANDIDATE_DIGEST=$(jq -r '.candidate | split("@")[1]' security/historical-evidence.json)
+          python3 scripts/evidence.py historical /tmp/historical
+          python3 tests/test-proposed-evidence.py /tmp/historical/evidence.zip | tee proposal-validation.json
           echo 'Proposal only: active policy still blocks publication. No approval granted.' >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve full reassessments
         if: always()

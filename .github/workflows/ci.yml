@@ -15,8 +15,10 @@ jobs:
   release:
     permissions:
       actions: read
-      contents: write
+      contents: read
       packages: write
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/release.yml
     with:
       bump: ${{ inputs.bump || 'auto' }}

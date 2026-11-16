@@ -15,7 +15,7 @@ spec.loader.exec_module(module)
 class AssessmentTests(unittest.TestCase):
     def setUp(self):
         self.policy = json.loads(Path("security/policy.json").read_text())
-        self.base = {"ArtifactName": "base@sha256:abc", "Metadata": {"OS": {"Family": "debian", "Name": "13.7"}},
+        self.base = {"SchemaVersion": 2, "ArtifactType": "container_image", "ArtifactName": "base@sha256:abc", "Metadata": {"OS": {"Family": "debian", "Name": "13.7"}},
                      "Results": [{"Target": "debian", "Class": "os-pkgs", "Type": "debian",
                                   "Packages": [{"Name": "libxml2"}], "Vulnerabilities": []}]}
         self.candidate = deepcopy(self.base)
@@ -98,6 +98,21 @@ class AssessmentTests(unittest.TestCase):
         self.assertEqual(origins["usr/bin/newtool"], "added package/component")
         self.assertFalse(result["pass"])
 
+    def test_malformed_suppressed_or_unsupported_scans_fail(self):
+        for key, value in {"SchemaVersion": 999, "ArtifactType": "filesystem", "Results": []}.items():
+            original = deepcopy(self.candidate)
+            self.candidate[key] = value
+            with self.subTest(key=key), self.assertRaises(AssertionError):
+                self.run_assessment()
+            self.candidate = original
+        self.candidate["Results"][0]["SuppressedFindings"] = [{}]
+        with self.assertRaises(AssertionError):
+            self.run_assessment()
+        del self.candidate["Results"][0]["SuppressedFindings"]
+        self.candidate["Results"][0]["Vulnerabilities"] = [self.vulnerability(severity="unsupported")]
+        with self.assertRaises(AssertionError):
+            self.run_assessment()
+
     def test_identity_and_unapproved_exceptions_fail_closed(self):
         self.candidate["ArtifactName"] = "wrong"
         with self.assertRaises(AssertionError):
@@ -123,7 +138,8 @@ class AcceptanceTests(unittest.TestCase):
                   "Packages": [{"Name": self.record["package"]}],
                   "Vulnerabilities": [{"PkgName": self.record["package"], "InstalledVersion": self.record["installed"],
                                        "VulnerabilityID": self.record["cve"], "Severity": "HIGH", "FixedVersion": "fixed"}]}
-        self.candidate = {"ArtifactName": self.candidate_ref, "Metadata": {"OS": {"Family": "debian", "Name": "13.7"}}, "Results": [result]}
+        self.candidate = {"SchemaVersion": 2, "ArtifactType": "container_image", "ArtifactName": self.candidate_ref, "Metadata": {"OS": {"Family": "debian", "Name": "13.7"}}, "Results": [result, {"Target": "debian", "Class": "os-pkgs", "Type": "debian", "Packages": [{"Name": "libc6"}]}]}
+        self.record["metadata_sha256"] = module.metadata_hash(result["Vulnerabilities"][0])
         self.upstream = deepcopy(self.candidate)
         self.upstream["ArtifactName"] = self.upstream_ref
 
@@ -137,6 +153,28 @@ class AcceptanceTests(unittest.TestCase):
         self.assertEqual(result["accepted_exceptions"], [self.record])
         self.assertIn(self.record["id"], module.markdown(result))
 
+    def test_duplicate_ids_scopes_and_record_reuse_fail(self):
+        self.policy["exceptions"].append(deepcopy(self.record))
+        with self.assertRaises(AssertionError):
+            self.assess()
+        self.policy["exceptions"][1]["id"] = "different-id"
+        with self.assertRaises(AssertionError):
+            self.assess()
+        self.policy["exceptions"].pop()
+        self.candidate["Results"][0]["Vulnerabilities"] *= 2
+        with self.assertRaises(AssertionError):
+            self.assess()
+
+    def test_changed_security_metadata_requires_reapproval(self):
+        vulnerability = self.candidate["Results"][0]["Vulnerabilities"][0]
+        for key, value in {"Severity": "CRITICAL", "FixedVersion": "new-fix", "Status": "affected", "CVSS": {"nvd": {"V3Score": 10}}, "References": ["new-advisory"], "Description": "changed"}.items():
+            previous = deepcopy(vulnerability)
+            vulnerability[key] = value
+            with self.assertRaises(AssertionError):
+                self.assess()
+            vulnerability.clear()
+            vulnerability.update(previous)
+
     def test_each_scope_change_blocks(self):
         for field, value in {"cve": "CVE-2026-99999", "package": "other/module", "installed": "v99",
                              "target": "usr/bin/other", "upstream_digest": "sha256:" + "a" * 64,
@@ -144,7 +182,8 @@ class AcceptanceTests(unittest.TestCase):
             with self.subTest(field=field):
                 previous = self.record[field]
                 self.record[field] = value
-                self.assertFalse(self.assess()["pass"])
+                with self.assertRaises(AssertionError):
+                    self.assess()
                 self.record[field] = previous
 
     def test_expired_future_unapproved_malformed_and_wildcards_fail_closed(self):
@@ -160,10 +199,8 @@ class AcceptanceTests(unittest.TestCase):
 
     def test_changed_upstream_version_cannot_be_inherited(self):
         self.upstream["Results"][0]["Vulnerabilities"][0]["InstalledVersion"] = "different"
-        result = self.assess()
-        self.assertFalse(result["pass"])
-        self.assertFalse(result["modification_pass"])
-        self.assertEqual(result["accepted_exceptions"], [])
+        with self.assertRaises(AssertionError):
+            self.assess()
 
     def test_secrets_and_unmatched_introduced_findings_always_block(self):
         self.candidate["Results"][0]["Secrets"] = [{"RuleID": "secret"}]

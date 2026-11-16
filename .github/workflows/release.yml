@@ -1,4 +1,4 @@
-name: Validate and release
+name: Build and validate candidate
 on:
   workflow_call:
     inputs:
@@ -17,8 +17,10 @@ jobs:
     timeout-minutes: 75
     permissions:
       actions: read
-      contents: write
+      contents: read
       packages: write
+      id-token: write
+      attestations: write
     env:
       GH_TOKEN: ${{ github.token }}
       IMAGE: ghcr.io/skulldorom/openhands-agent
@@ -32,11 +34,15 @@ jobs:
           sudo apt-get install -y shellcheck
           for script in scripts/*.sh tests/*.sh; do bash -n "$script"; done
           shellcheck scripts/*.sh tests/*.sh
-          python3 -m py_compile scripts/release.py scripts/security-assessment.py scripts/explain-blockers.py
+          python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
+          python3 -m py_compile scripts/*.py tests/*.py
           python3 tests/test-init-local.py
           python3 tests/test-security-assessment.py
           python3 tests/test-blocker-explain.py
           python3 tests/test-release-evidence.py
+          python3 tests/test-release-planning.py
+          python3 tests/test-provenance.py
+          python3 tests/test-workflow-policy.py
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Inspect upstream contract and plan version
         id: plan
@@ -80,6 +86,13 @@ jobs:
             UPSTREAM_DIGEST=${{ steps.plan.outputs.upstream }}
             VERSION=${{ steps.plan.outputs.version }}
             REVISION=${{ github.sha }}
+      - name: Attest image build
+        if: steps.plan.outputs.build == 'true'
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-name: ghcr.io/skulldorom/openhands-agent
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
       - name: Pull exact artifact and validate metadata
         if: steps.plan.outputs.build == 'true'
         env:
@@ -96,7 +109,6 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           scripts/validate-image.sh "$IMAGE@$DIGEST"
-          printf '{"pass":true,"candidate":"%s@%s"}\n' "$IMAGE" "$DIGEST" > functional-pass.json
           echo '## Functional validation: PASS (Git commits, PostgreSQL backup/restore, API, entrypoint and signals, metadata)' >> "$GITHUB_STEP_SUMMARY"
       - name: Layer security and package inventory
         if: steps.plan.outputs.build == 'true'
@@ -112,6 +124,16 @@ jobs:
             done
             apt-cache policy libpq5 postgresql-17 postgresql-client-17 linux-libc-dev gh docker-ce-rootless-extras docker-buildx-plugin docker-compose-plugin
           ' > package-inventory.txt
+      - name: Record complete functional evidence
+        if: steps.plan.outputs.build == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: python3 scripts/evidence.py record "$DIGEST"
+      - name: Attest functional evidence
+        if: steps.plan.outputs.build == 'true'
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-path: functional-pass.json
       - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         if: steps.plan.outputs.build == 'true'
         with:
@@ -130,7 +152,7 @@ jobs:
         run: |
           trivy image --cache-dir .cache/trivy --skip-db-update --skip-java-db-update \
             --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
-            --ignore-unfixed=false --list-all-pkgs --format json --output trivy.json \
+            --ignorefile /dev/null --ignore-unfixed=false --list-all-pkgs --format json --output trivy.json \
             --timeout 15m "$IMAGE@$DIGEST"
       - name: Scan exact upstream with the same Trivy database
         if: steps.plan.outputs.build == 'true'
@@ -138,7 +160,7 @@ jobs:
           UPSTREAM: ${{ steps.plan.outputs.upstream }}
         run: |
           trivy image --cache-dir .cache/trivy --skip-db-update --skip-java-db-update \
-            --scanners vuln --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL --ignore-unfixed=false \
+            --scanners vuln --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL --ignorefile /dev/null --ignore-unfixed=false \
             --list-all-pkgs --format json --output upstream-trivy.json --timeout 15m \
             "ghcr.io/openhands/agent-server@$UPSTREAM"
           curl --fail --show-error --silent --retry 3 --max-time 120 \
@@ -167,14 +189,6 @@ jobs:
         continue-on-error: true
         run: |
           python3 scripts/explain-blockers.py --gate security-gate.json --summary | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Promote validated digest and create release
-        if: steps.plan.outputs.build == 'true'
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          python3 scripts/release.py publish "$DIGEST"
-          cat state.json >> "$GITHUB_STEP_SUMMARY"
-          echo 'All required image integration and security gates passed.' >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve validation evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

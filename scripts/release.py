@@ -40,12 +40,20 @@ def gh(*args):
     return subprocess.check_output(["gh", *args], text=True).strip()
 
 
-def fingerprint():
-    files = subprocess.check_output(["git", "ls-files", "Dockerfile", "scripts", "tests", ".github/workflows", ".dockerignore", "compatibility.json", "security/policy.json"], text=True).splitlines()
+BUILD_INPUTS = ["Dockerfile", ".dockerignore", "scripts/init-git.sh"]
+
+
+def fingerprint(revision=None):
     h = hashlib.sha256()
-    for name in files:
-        h.update(name.encode() + b"\0" + Path(name).read_bytes())
+    for name in BUILD_INPUTS:
+        data = (subprocess.check_output(["git", "show", revision + ":" + name])
+                if revision else Path(name).read_bytes())
+        h.update(name.encode() + b"\0" + data)
     return h.hexdigest()
+
+
+def build_required(previous, current, upstream):
+    return previous is None or previous["fingerprint"] != current or previous["upstream_digest"] != upstream
 
 
 def reusable_blocker(state, gate, functional, current, upstream):
@@ -70,7 +78,7 @@ def previous_blocked_attempt(current, upstream):
                 state = json.loads(archive.read("state.json"))
                 gate = json.loads(archive.read("security-gate.json"))
                 functional = json.loads(archive.read("functional-pass.json"))
-                if reusable_blocker(state, gate, functional, current, upstream):
+                if reusable_blocker(dict(state, fingerprint=fingerprint(state["commit"])), gate, functional, current, upstream):
                     return run["html_url"]
     return None
 
@@ -96,7 +104,7 @@ def plan():
         # A missing initial release is acceptable; authentication/network errors are not.
         assert "404" in result.stderr, result.stderr
     current = fingerprint()
-    changed = not old or old["fingerprint"] != current or old["upstream_digest"] != upstream
+    changed = build_required(old, current, upstream)
     blocked = previous_blocked_attempt(current, upstream) if changed else None
     bump = os.environ.get("BUMP", "auto")
     messages = ""
@@ -112,7 +120,7 @@ def plan():
     state = {"version": release_version, "upstream_digest": upstream, "upstream_source": sha, "agent_server_version": version, "fingerprint": current, "commit": os.environ["GITHUB_SHA"]}
     Path("state.json").write_text(json.dumps(state, indent=2) + "\n")
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-        for key, value in {"build": str(not blocked and (changed or os.environ.get("BUMP", "auto") != "auto")).lower(), "version": release_version, "upstream": upstream, "blocked": blocked or ""}.items():
+        for key, value in {"build": str(not blocked and changed).lower(), "version": release_version, "upstream": upstream, "blocked": blocked or ""}.items():
             output.write(f"{key}={value}\n")
 
 
@@ -134,6 +142,16 @@ def validate_publication_evidence(state, assessment, functional, policy, digest)
 
 
 def publish(digest):
+    # All publication entry points require the same exact-bundle approval boundary.
+    import promotion
+    promotion.protected_approval()
+    import evidence
+    state_evidence = json.loads(Path("state.json").read_text())
+    run_evidence = json.loads(Path("reverified/trusted-run.json").read_text())
+    evidence.verify_signature("oci://" + IMAGE + "@" + digest, run_evidence)
+    evidence.verify_signature("functional-pass.json", run_evidence)
+    evidence.validate_functional(json.loads(Path("functional-pass.json").read_text()), state_evidence,
+                                 json.loads(Path("reverified/trusted-run.json").read_text()), IMAGE + "@" + digest)
     assert json.loads(Path("security/policy.json").read_text())["release_approved"] is True, "Owner release approval missing"
     assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
     state = json.loads(Path("state.json").read_text())
@@ -170,7 +188,7 @@ Full state and build fingerprint are attached in state.json. Previous versions r
 _This release was created by an AI-authored OpenHands workflow on behalf of the repository owner._
 """
     Path("release-notes.txt").write_text(notes)
-    subprocess.run(["gh", "release", "create", "v" + version, "--target", state["commit"], "--title", "v" + version, "--notes-file", "release-notes.txt", "state.json", "security-assessment.md", "security-assessment.json", "security-gate.json", "trivy.json", "upstream-trivy.json", "scanner-version.json", "scanner-database.sha256", "functional-pass.json", "package-inventory.txt", "debian-tracker.json", "security/policy.json"], check=True)
+    subprocess.run(["gh", "release", "create", "v" + version, "--target", state["commit"], "--title", "v" + version, "--notes-file", "release-notes.txt", "state.json", "security-assessment.md", "security-assessment.json", "security-gate.json", "trivy.json", "upstream-trivy.json", "scanner-version.json", "scanner-database.sha256", "functional-pass.json", "package-inventory.txt", "debian-tracker.json", "security/policy.json", "selection.json", "approval-summary.md"], check=True)
     subprocess.run(["docker", "buildx", "imagetools", "create", "--prefer-index=false", "--tag", IMAGE + ":latest", IMAGE + "@" + digest], check=True)
 
 
@@ -178,6 +196,7 @@ if __name__ == "__main__":
     if sys.argv[1] == "plan":
         plan()
     elif sys.argv[1] == "publish":
-        publish(sys.argv[2])
+        import promotion
+        promotion.publish()
     else:
         raise SystemExit("Usage: release.py plan | publish DIGEST")

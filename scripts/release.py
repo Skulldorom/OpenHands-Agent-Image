@@ -62,25 +62,63 @@ def reusable_blocker(state, gate, functional, current, upstream):
             and gate["upstream"] == "ghcr.io/openhands/agent-server@" + upstream
             and not gate["pass"] and bool(gate["blockers"]))
 
-def previous_blocked_attempt(current, upstream):
-    runs = json.loads(gh("api", f"repos/{REPO}/actions/runs?branch=main&status=completed&per_page=50"))
-    for run in runs["workflow_runs"]:
-        if run["name"] not in {"CI", "Daily upstream update"}:
-            continue
-        artifacts = json.loads(gh("api", f"repos/{REPO}/actions/runs/{run['id']}/artifacts"))
-        for artifact in artifacts["artifacts"]:
-            if artifact["expired"] or not artifact["name"].startswith("validation-"):
+def reusable_candidate(state, current, upstream):
+    return (state["fingerprint"] == current and state["upstream_digest"] == upstream
+            and re.fullmatch(r"sha256:[a-f0-9]{64}", state.get("image_digest", "")) is not None)
+
+def candidate_key(current, upstream):
+    return "content-" + hashlib.sha256((current + "\0" + upstream).encode()).hexdigest()
+
+def retained_marker(current, upstream):
+    try:
+        digest, _ = registry("skulldorom/openhands-agent", candidate_key(current, upstream))
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise
+    return digest
+
+def previous_candidate(current, upstream):
+    page = 1
+    while True:
+        runs = json.loads(gh("api", f"repos/{REPO}/actions/runs?branch=main&status=completed&per_page=100&page={page}"))["workflow_runs"]
+        for run in runs:
+            if run["path"] not in {".github/workflows/ci.yml", ".github/workflows/upstream-update.yml"}:
                 continue
-            raw = subprocess.check_output(["gh", "api", f"repos/{REPO}/actions/artifacts/{artifact['id']}/zip"])
-            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-                if not {"state.json", "security-gate.json", "functional-pass.json"} <= set(archive.namelist()):
+            artifacts = json.loads(gh("api", f"repos/{REPO}/actions/runs/{run['id']}/artifacts?per_page=100"))["artifacts"]
+            for artifact in artifacts:
+                if artifact["expired"] or artifact["name"] != f"validation-{run['id']}-{run['run_attempt']}":
                     continue
-                state = json.loads(archive.read("state.json"))
-                gate = json.loads(archive.read("security-gate.json"))
-                functional = json.loads(archive.read("functional-pass.json"))
-                if reusable_blocker(dict(state, fingerprint=fingerprint(state["commit"])), gate, functional, current, upstream):
-                    return run["html_url"]
-    return None
+                raw = subprocess.check_output(["gh", "api", f"repos/{REPO}/actions/artifacts/{artifact['id']}/zip"])
+                assert "sha256:" + hashlib.sha256(raw).hexdigest() == artifact["digest"], "Candidate ledger integrity mismatch"
+                with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                    assert len(archive.namelist()) == len(set(archive.namelist()))
+                    if "state.json" not in archive.namelist():
+                        continue
+                    state = json.loads(archive.read("state.json"))
+                    if "image_digest" not in state and "functional-pass.json" in archive.namelist():
+                        state["image_digest"] = json.loads(archive.read("functional-pass.json"))["candidate"].removeprefix(IMAGE + "@")
+                    state["fingerprint"] = fingerprint(state["commit"])
+                    if reusable_candidate(state, current, upstream):
+                        return {"candidate": state["image_digest"], "evidence_run": str(run["id"]),
+                                "evidence_attempt": str(run["run_attempt"]), "url": run["html_url"]}
+        if len(runs) < 100:
+            return None
+        page += 1
+
+def next_version(previous, bump):
+    assert bump in {"patch", "minor", "major"}, "Invalid release increment"
+    if previous is None:
+        return "1.0.0"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", previous), "Invalid previous version"
+    major, minor, patch = map(int, previous.split("."))
+    return f"{major+1}.0.0" if bump == "major" else f"{major}.{minor+1}.0" if bump == "minor" else f"{major}.{minor}.{patch+1}"
+
+def record_candidate(digest):
+    assert re.fullmatch(r"sha256:[a-f0-9]{64}", digest)
+    state = json.loads(Path("state.json").read_text())
+    state["image_digest"] = digest
+    Path("state.json").write_text(json.dumps(state, indent=2) + "\n")
 
 def plan():
     policy = json.loads(Path("compatibility.json").read_text())
@@ -105,22 +143,26 @@ def plan():
         assert "404" in result.stderr, result.stderr
     current = fingerprint()
     changed = build_required(old, current, upstream)
-    blocked = previous_blocked_attempt(current, upstream) if changed else None
+    retained = previous_candidate(current, upstream) if changed else None
+    marker = retained_marker(current, upstream) if changed and not retained else None
+    blocked = retained["url"] if retained else ("Persistent candidate " + marker + "; evidence expired or unavailable; do not rebuild" if marker else None)
+    if retained:
+        Path("retained-candidate.json").write_text(json.dumps(retained, indent=2) + "\n")
     bump = os.environ.get("BUMP", "auto")
     messages = ""
     if old:
         messages = subprocess.check_output(["git", "log", old["commit"] + "..HEAD", "--format=%B"], text=True)
     if bump == "auto":
         bump = "major" if re.search(r"(?m)^release:major\s*$", messages) else "minor" if re.search(r"(?m)^release:minor\s*$", messages) else "patch"
-    if not old:
-        release_version = "1.0.0"
-    else:
-        major, minor, patch = map(int, old["version"].split("."))
-        release_version = f"{major+1}.0.0" if bump == "major" else f"{major}.{minor+1}.0" if bump == "minor" else f"{major}.{minor}.{patch+1}"
+    release_version = next_version(old["version"] if old else None, bump)
     state = {"version": release_version, "upstream_digest": upstream, "upstream_source": sha, "agent_server_version": version, "fingerprint": current, "commit": os.environ["GITHUB_SHA"]}
     Path("state.json").write_text(json.dumps(state, indent=2) + "\n")
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-        for key, value in {"build": str(not blocked and changed).lower(), "version": release_version, "upstream": upstream, "blocked": blocked or ""}.items():
+        for key, value in {"build": str(not blocked and changed).lower(), "version": release_version, "upstream": upstream, "blocked": blocked or "",
+                           "candidate_key": candidate_key(current, upstream),
+                           "candidate": retained["candidate"] if retained else (marker or ""),
+                           "evidence_run": retained["evidence_run"] if retained else "",
+                           "evidence_attempt": retained["evidence_attempt"] if retained else ""}.items():
             output.write(f"{key}={value}\n")
 
 
@@ -144,6 +186,7 @@ def validate_publication_evidence(state, assessment, functional, policy, digest)
 def publish(digest):
     # All publication entry points require the same exact-bundle approval boundary.
     import promotion
+    promotion.independent_initiator()
     promotion.protected_approval()
     import evidence
     state_evidence = json.loads(Path("state.json").read_text())
@@ -195,6 +238,8 @@ _This release was created by an AI-authored OpenHands workflow on behalf of the 
 if __name__ == "__main__":
     if sys.argv[1] == "plan":
         plan()
+    elif sys.argv[1] == "record-candidate":
+        record_candidate(sys.argv[2])
     elif sys.argv[1] == "publish":
         import promotion
         promotion.publish()

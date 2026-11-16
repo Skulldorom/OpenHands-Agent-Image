@@ -18,3 +18,5 @@ selection.json
 approval-summary.md
 trusted/
 reverified/
+promotion-dry-run.json
+retained-candidate.json

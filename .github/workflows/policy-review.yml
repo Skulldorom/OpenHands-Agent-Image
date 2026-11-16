@@ -29,14 +29,16 @@ jobs:
           python3 tests/test-release-evidence.py
           python3 tests/test-release-planning.py
           python3 tests/test-provenance.py
+          python3 tests/test-automation-safety.py
           python3 tests/test-workflow-policy.py
       - name: Reassess retained exact-artifact evidence without building or publishing
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          export EVIDENCE_RUN=$(jq -r .run_id security/historical-evidence.json)
-          export EVIDENCE_ATTEMPT=$(jq -r .attempt security/historical-evidence.json)
-          export CANDIDATE_DIGEST=$(jq -r '.candidate | split("@")[1]' security/historical-evidence.json)
+          EVIDENCE_RUN=$(jq -r .run_id security/historical-evidence.json)
+          EVIDENCE_ATTEMPT=$(jq -r .attempt security/historical-evidence.json)
+          CANDIDATE_DIGEST=$(jq -r '.candidate | split("@")[1]' security/historical-evidence.json)
+          export EVIDENCE_RUN EVIDENCE_ATTEMPT CANDIDATE_DIGEST
           python3 scripts/evidence.py historical /tmp/historical
           python3 tests/test-proposed-evidence.py /tmp/historical/evidence.zip | tee proposal-validation.json
           echo 'Proposal only: active policy still blocks publication. No approval granted.' >> "$GITHUB_STEP_SUMMARY"

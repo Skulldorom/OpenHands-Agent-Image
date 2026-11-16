@@ -120,7 +120,8 @@ class ProvenanceTests(unittest.TestCase):
             os.environ.update(CANDIDATE_DIGEST="candidate", GITHUB_SHA="source", GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT="1")
             selection = {"candidate": "candidate", "policy_sha256": promotion.policy_hash(), "policy_commit": "source",
                          "run_id": 123, "run_attempt": 1, "scanned_at": datetime.now(timezone.utc).isoformat(), "files": {}}
-            promotion.recheck(selection, datetime.now(timezone.utc))
+            with self.assertRaises(AssertionError):
+                promotion.recheck(selection, datetime.now(timezone.utc))
             for key, value in {"candidate": "other", "policy_sha256": "other", "policy_commit": "other", "run_id": 456,
                                "run_attempt": 2, "scanned_at": (datetime.now(timezone.utc)-timedelta(hours=25)).isoformat(),
                                "files": {"security/policy.json": "altered"}}.items():

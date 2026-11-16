@@ -152,7 +152,7 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
             consumed.add(record["id"])
             accepted.append(record)
         rows.append(row)
-    assert consumed == {r["id"] for r in policy["exceptions"]}, "Unused acceptance scope requires policy review"
+    assert consumed == {r["id"] for r in policy["exceptions"]}, "Renewed risk acceptance required: candidate, upstream, finding metadata or exact scope changed"
     secrets = [dict(target=result["Target"], rule=secret.get("RuleID"), title=secret.get("Title"))
                for result in candidate["Results"] for secret in result.get("Secrets", [])]
     blockers = [row for row in rows if row["blocking_reasons"] and not row["accepted_exception"]]

@@ -1,0 +1,124 @@
+name: Propose trusted candidate promotion
+on:
+  workflow_run:
+    workflows: [CI, Daily upstream update]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+  actions: read
+  packages: read
+  attestations: read
+concurrency:
+  group: promotion-proposal
+  cancel-in-progress: false
+jobs:
+  propose:
+    if: >-
+      vars.PROMOTION_AUTOMATION_ENABLED == 'true' &&
+      github.event.workflow_run.repository.full_name == github.repository &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == 'main' &&
+      contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event.workflow_run.event)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate exact completed build evidence and suppress unchanged proposals
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ github.event.workflow_run.id }}
+          SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          SOURCE_PATH: ${{ github.event.workflow_run.path }}
+          POLICY_COMMIT: ${{ github.sha }}
+          PUBLICATION_ENABLED: ${{ vars.PROMOTION_PUBLICATION_ENABLED }}
+        run: |
+          python3 - <<'PY'
+          import io
+          import hashlib
+          import json
+          import os
+          import subprocess
+          import sys
+          import zipfile
+          sys.path.insert(0, 'scripts')
+          import evidence
+          import release
+
+          assert os.environ['SOURCE_PATH'] in {'.github/workflows/ci.yml', '.github/workflows/upstream-update.yml'}
+          assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == os.environ["POLICY_COMMIT"]
+          run = int(os.environ['SOURCE_RUN'])
+          attempt = int(os.environ['SOURCE_ATTEMPT'])
+          # Retrieve only the functional record to select a digest; authenticate it before use.
+          artifacts = evidence.api(f'actions/runs/{run}/artifacts?per_page=100')['artifacts']
+          matches = [a for a in artifacts if a['name'] == f'validation-{run}-{attempt}' and not a['expired']]
+          assert len(matches) == 1, 'Missing or ambiguous candidate evidence'
+          raw = subprocess.check_output(['gh', 'api', f"repos/{release.REPO}/actions/artifacts/{matches[0]['id']}/zip"])
+          assert "sha256:" + hashlib.sha256(raw).hexdigest() == matches[0]["digest"], "Source ledger digest mismatch"
+          with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+              assert len(archive.namelist()) == len(set(archive.namelist()))
+              if 'retained-candidate.json' in archive.namelist():
+                  assert archive.getinfo('retained-candidate.json').file_size < 1_000_000
+                  retained = json.loads(archive.read('retained-candidate.json'))
+                  digest, run, attempt = retained['candidate'], int(retained['evidence_run']), int(retained['evidence_attempt'])
+              elif 'functional-pass.json' not in archive.namelist():
+                  print('No new or retained candidate; no promotion attempt.')
+                  sys.exit(0)
+              else:
+                  assert archive.getinfo('functional-pass.json').file_size < 1_000_000
+                  functional = json.loads(archive.read('functional-pass.json'))
+                  digest = functional['candidate'].removeprefix(release.IMAGE + '@')
+          state = evidence.download(run, attempt, digest, 'trusted')
+          assert state['fingerprint'] == release.fingerprint(state['commit']) == release.fingerprint()
+          policy_hash = hashlib.sha256(open('security/policy.json', 'rb').read()).hexdigest()
+          policy = json.load(open('security/policy.json'))
+          dry_run = not (os.environ['PUBLICATION_ENABLED'] == 'true' and policy['release_approved'] is True)
+          title = f"Promote {digest} policy {policy_hash} dry-run {str(dry_run).lower()}"
+          pages = json.loads(subprocess.check_output([
+              'gh', 'api', '--paginate', '--slurp',
+              f'repos/{release.REPO}/actions/workflows/promote.yml/runs?event=workflow_dispatch&per_page=100'], text=True))
+          if any(r['display_title'] == title for page in pages for r in page['workflow_runs']):
+              print('Unchanged candidate and policy already proposed; no retry.')
+          else:
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                  output.write(f'candidate={digest}\nrun={run}\nattempt={attempt}\npolicy={policy_hash}\ndry_run={str(dry_run).lower()}\n')
+          PY
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        if: steps.candidate.outputs.candidate != ''
+        id: app
+        with:
+          app-id: ${{ vars.PROMOTION_APP_ID }}
+          private-key: ${{ secrets.PROMOTION_APP_PRIVATE_KEY }}
+          permission-actions: write
+      - name: Dispatch gated promotion as independent GitHub App
+        if: steps.candidate.outputs.candidate != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TRUSTED_RELEASE_ACTOR: ${{ vars.TRUSTED_RELEASE_ACTOR }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          POLICY_SHA256: ${{ steps.candidate.outputs.policy }}
+          DRY_RUN: ${{ steps.candidate.outputs.dry_run }}
+          CANDIDATE: ${{ steps.candidate.outputs.candidate }}
+          EVIDENCE_RUN: ${{ steps.candidate.outputs.run }}
+          EVIDENCE_ATTEMPT: ${{ steps.candidate.outputs.attempt }}
+        run: |
+          test -n "$APP_SLUG"
+          test "${APP_SLUG}[bot]" = "$TRUSTED_RELEASE_ACTOR"
+          test "${APP_SLUG}[bot]" != Skulldorom
+          test "$(gh api "users/${APP_SLUG}[bot]" --jq .type)" = Bot
+          gh workflow run promote.yml --ref main \
+            -f dry_run="$DRY_RUN" -f policy_sha256="$POLICY_SHA256" -f candidate="$CANDIDATE" \
+            -f evidence_run="$EVIDENCE_RUN" -f evidence_attempt="$EVIDENCE_ATTEMPT" -f bump=patch
+      - name: Preserve proposal diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: promotion-proposal-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          path: |
+            trusted/

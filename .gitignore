@@ -1,0 +1,6 @@
+.env
+*.tar
+__pycache__/
+*.pyc
+state.json
+candidate.json

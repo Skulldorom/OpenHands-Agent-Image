@@ -1,0 +1,118 @@
+name: Validate and release
+on:
+  workflow_call:
+    inputs:
+      bump:
+        type: string
+        default: auto
+permissions:
+  contents: read
+concurrency:
+  group: ghcr-main-release
+  cancel-in-progress: false
+jobs:
+  build-test-publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      IMAGE: ghcr.io/skulldorom/openhands-agent
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Shell syntax, ShellCheck, and Python syntax
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+          for script in scripts/*.sh tests/*.sh; do bash -n "$script"; done
+          shellcheck scripts/*.sh tests/*.sh
+          python3 -m py_compile scripts/release.py
+          python3 tests/test-init-local.py
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Inspect upstream contract and plan version
+        id: plan
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: python3 scripts/release.py plan
+      - name: Skip unchanged image
+        if: steps.plan.outputs.build != 'true'
+        run: echo 'Upstream and build inputs unchanged; no release.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        if: steps.plan.outputs.build == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Dockerfile checks
+        if: steps.plan.outputs.build == 'true'
+        env:
+          UPSTREAM: ${{ steps.plan.outputs.upstream }}
+        run: docker buildx build --check --build-arg UPSTREAM_IMAGE="ghcr.io/openhands/agent-server@$UPSTREAM" .
+      - name: Build candidate once with SBOM and provenance
+        id: build
+        if: steps.plan.outputs.build == 'true'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/skulldorom/openhands-agent:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            UPSTREAM_IMAGE=ghcr.io/openhands/agent-server@${{ steps.plan.outputs.upstream }}
+            UPSTREAM_DIGEST=${{ steps.plan.outputs.upstream }}
+            VERSION=${{ steps.plan.outputs.version }}
+            REVISION=${{ github.sha }}
+      - name: Pull exact artifact and validate metadata
+        if: steps.plan.outputs.build == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          UPSTREAM: ${{ steps.plan.outputs.upstream }}
+        run: |
+          docker pull "$IMAGE@$DIGEST"
+          test "$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.base.digest" }}' "$IMAGE@$DIGEST")" = "$UPSTREAM"
+          test "$(docker inspect -f '{{.Config.User}}' "$IMAGE@$DIGEST")" = openhands
+          test "$(docker inspect -f '{{.Architecture}}' "$IMAGE@$DIGEST")" = amd64
+      - name: Git, PostgreSQL 17, Agent Server API, and signals
+        if: steps.plan.outputs.build == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: scripts/validate-image.sh "$IMAGE@$DIGEST"
+      - name: Vulnerability gate
+        if: steps.plan.outputs.build == 'true'
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          image-ref: ghcr.io/skulldorom/openhands-agent@${{ steps.build.outputs.digest }}
+          format: table
+          output: trivy.txt
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          scanners: vuln,secret
+          timeout: 15m
+      - name: Promote validated digest and create release
+        if: steps.plan.outputs.build == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          python3 scripts/release.py publish "$DIGEST"
+          cat state.json >> "$GITHUB_STEP_SUMMARY"
+          echo 'All required image integration and security gates passed.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            state.json
+            trivy.txt
+          if-no-files-found: ignore
+      - name: Failure summary
+        if: failure()
+        run: echo 'Validation failed. No latest promotion occurred. Inspect job logs; existing releases are preserved.' >> "$GITHUB_STEP_SUMMARY"

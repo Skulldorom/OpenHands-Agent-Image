@@ -121,7 +121,7 @@ done
 [[ "$ready" == true ]] || { docker logs "$cid"; exit 1; }
 timeout 15 docker exec "$cid" curl -fsS --max-time 10 -H "X-Session-API-Key: $key" http://127.0.0.1:8000/server_info > "$work/info.json"
 python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["version"]=="1.62.0"' "$work/info.json"
-processes=$(docker top "$cid" -eo comm)
+processes=$(docker top "$cid" -eo pid,comm | awk 'NR > 1 {print $2}')
 if grep -Ex 'postgres|postmaster' <<< "$processes"; then exit 1; fi
 timeout 30 docker stop -t 15 "$cid" >/dev/null
 [[ $(docker inspect -f '{{.State.ExitCode}}' "$cid") != 137 ]]

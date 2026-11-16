@@ -30,7 +30,9 @@ Official latest release tags and their go.mod were checked on 2026-11-16:
 | [RootlessKit 3.3.0](https://github.com/rootless-containers/rootlesskit/releases/tag/v3.3.0), Docker rootless extras 29.9.3 | CVE-2026-78661 | golang.org/x/net v0.60.0 | v0.62.0 | Keep blocked; no supported fixed bundle demonstrated |
 | [Compose 5.7.1](https://github.com/docker/compose/releases/tag/v5.7.1) | CVE-2026-78661 | golang.org/x/net v0.60.0 | v0.62.0 | Keep blocked; latest released tool still affected |
 | [Buildx 0.39.0](https://github.com/docker/buildx/releases/tag/v0.39.0) | CVE-2026-17106 | github.com/moby/go-archive v0.2.0 | v0.3.0 | Keep blocked; latest released tool still affected |
-| Buildx 0.39.0 | CVE-2026-41567, CVE-2026-42306 | github.com/docker/docker v28.5.2+incompatible | none advertised | Explicit high-risk blockers until reachability/fix is established |
+| Buildx 0.39.0 | CVE-2026-41567, CVE-2026-42306 | github.com/docker/docker v28.5.2+incompatible | none advertised | Explicit blockers; daemon-side paths, no daemon shipped, still not cleared without reviewed evidence |
+
+Both docker/docker CVEs describe daemon operations (archive upload into a container, docker cp mount setup) fixed in Engine 29.5.1. This image starts no daemon; rootless extras is 29.9.3. That argues against reachability but does not by itself justify clearing an embedded vulnerable module, so both remain designated blockers pending a reviewed CVE-scoped decision.
 
 Buildx already uses x/net v0.62.0; Compose already uses go-archive v0.3.3. Replacing those tools would not fix the other tool's module. Vendor source evidence: `https://raw.githubusercontent.com/<repository>/<release>/go.mod` at the above tags. Earlier downloaded vendor packages' embedded module metadata agrees with these manifests; CI scans the actual candidate binaries. A dependency manifest is supporting evidence, not a substitute for scanning the binary.
 

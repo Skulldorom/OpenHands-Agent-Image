@@ -42,6 +42,10 @@ def vendor_verdict(blocker, evidence):
     artifact = evidence["artifacts"].get(blocker["target"])
     if not artifact:
         return None, "no recorded inspection of the newest release artifact that ships this binary"
+    latest = artifact.get("latest_release", artifact["release"])
+    if latest != artifact["release"]:
+        return None, (f"newest vendor release {latest} has no verified binary inspection; "
+                      f"last inspected artifact {artifact['release']} is superseded")
     module = blocker["package"]
     shipped = artifact["modules"].get(module)
     if shipped is None:

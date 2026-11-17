@@ -72,7 +72,7 @@ jobs:
         shell: bash
         run: |
           candidate=$(jq -r .candidate security/historical-evidence.json)
-          docker run --rm --read-only --network none --cap-drop ALL --security-opt no-new-privileges \
+          docker run --rm -i --read-only --network none --cap-drop ALL --security-opt no-new-privileges \
             --entrypoint /bin/sh "$candidate" -s > os-reachability.txt <<'SH'
           set -eu
           dpkg-query -W libxml2 linux-libc-dev chromium
@@ -86,7 +86,19 @@ jobs:
           curl --fail --silent --show-error --retry 3 --max-time 120 \
             https://github.com/docker/compose/releases/download/v5.7.2/docker-compose-linux-x86_64 \
             --output /tmp/vendor-compose-5.7.2
-          printf '%s  %s\n' e14235d9c622c5bd57eb8adeed4a0f7308c7f3862e6812dd843f6fe27f1307cc /tmp/vendor-compose-5.7.2 | sha256sum --check
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          raw = Path("/tmp/vendor-compose-5.7.2").read_bytes()
+          expected = "e14235d9c622c5bd57eb8adeed4a0f7308c7f3862e6812dd843f6fe27f1307cc"
+          actual = hashlib.sha256(raw).hexdigest()
+          report = {"release": "v5.7.2", "expected_sha256": expected, "download_sha256": actual,
+                    "download_size": len(raw), "verified": bool(raw) and actual == expected,
+                    "source": "GitHub official release asset metadata"}
+          Path("reachability/vendor-compose-5.7.2-verification.json").write_text(json.dumps(report, indent=2) + "\n")
+          assert report["verified"], "Vendor binary integrity check failed; module inspection is blocked"
+          PY
           go version -m /tmp/vendor-compose-5.7.2 > reachability/vendor-compose-5.7.2.modules.txt
           rm /tmp/vendor-compose-5.7.2
       - name: Preserve unsuppressed audit evidence
@@ -111,3 +123,17 @@ jobs:
             debian-tracker.json
             security-assessment.json
             security-assessment.md
+
+      - name: Retain compact reachability and inventory review evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: reachability-review-${{ github.run_id }}
+          retention-days: 90
+          path: |
+            os-reachability.txt
+            go-inspection-toolchain.txt
+            govulncheck-version.txt
+            reachability/
+            high-critical-inventory.json
+            high-critical-inventory.md

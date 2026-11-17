@@ -1,6 +1,6 @@
 {
-  "checked": "2026-11-16",
-  "method": "Read-only inspection of the newest official release artifact per tool: embedded Go module build information and the release go.mod. No artifact was executed.",
+  "checked": "2026-11-17",
+  "method": "2026-11-16 read-only binary inspections plus 2026-11-17 latest-release metadata review. Compose 5.7.1 is superseded by 5.7.2; current binary verification is unresolved. See security/PRIORITY-ASSESSMENT.md.",
   "artifacts": [
     {
       "package": "gh",
@@ -28,7 +28,9 @@
       "modules": {
         "golang.org/x/net": "v0.60.0",
         "github.com/moby/go-archive": "v0.3.3"
-      }
+      },
+      "latest_release": "v5.7.2",
+      "verification_status": "superseded; newest binary checksum verification failed"
     },
     {
       "package": "docker-buildx-plugin",
@@ -42,5 +44,5 @@
       }
     }
   ],
-  "review_by": "2026-12-16"
+  "review_by": "2026-11-24"
 }

@@ -1,5 +1,7 @@
 # Security and release policy
 
+Current work: [credential-layer investigation](security/CREDENTIAL-LAYER-INVESTIGATION.md), [complete grouped HIGH/CRITICAL inventory](security/HIGH-CRITICAL.md), [prioritized reachability assessment](security/PRIORITY-ASSESSMENT.md), and [isolated publication test setup](security/PUBLICATION-TEST-SETUP.md). The Node-cache marker was a false positive; real PEM payloads and tokens remain blocking. Hosted publication is still unverified and the fresh security assessment still blocks 530 instances. The Compose 5.7.1 binary evidence is explicitly superseded by release 5.7.2; remediation remains undetermined because current binary integrity verification has not passed.
+
 ## Mandatory gates
 
 Scan exact upstream and candidate with Trivy 0.69.3 and one frozen database. Preserve complete unsuppressed UNKNOWN through CRITICAL results; no severity suppression or ignore-unfixed exclusions. Publication requires successful real functional tests, signed build/test provenance, exact candidate/base/source binding, sealed same-run artifacts, current policy fingerprints and scans no older than 24 hours. Missing, inconsistent, expired or failed evidence blocks.

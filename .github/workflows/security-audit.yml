@@ -51,10 +51,13 @@ jobs:
           candidate=$(jq -r .candidate security/historical-evidence.json)
           timeout 15m python3 tests/test-image-layers.py "$candidate"
       - name: Require exact-upstream custom security policy
+        if: always()
         run: python3 -c 'import json; assert json.load(open("security-assessment.json"))["pass"], "Custom risk, emergency block or secrets prevent release"'
       - name: Group all HIGH and CRITICAL instances without suppressing findings
+        if: always()
         run: python3 scripts/group-security-inventory.py security-assessment.json
       - name: Inspect compiled Go reachability without executing candidate tools
+        if: always()
         shell: bash
         run: |
           go version > go-inspection-toolchain.txt
@@ -77,6 +80,7 @@ jobs:
             rm "reachability/$name"
           done
       - name: Record OS package and XML consumer reachability in isolated container
+        if: always()
         shell: bash
         run: |
           candidate=$(jq -r .candidate security/historical-evidence.json)
@@ -89,6 +93,7 @@ jobs:
           if command -v dockerd; then printf '%s\n' 'A daemon binary exists; review required'; fi
           SH
       - name: Inspect newly released Compose vendor artifact without running it
+        if: always()
         shell: bash
         run: python3 scripts/verify-compose-vendor.py
       - name: Preserve unsuppressed audit evidence

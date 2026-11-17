@@ -102,12 +102,28 @@ class PublicationTests(unittest.TestCase):
             promotion.reconcile(dict(self.state, image_digest="other"), backend, lambda s: None)
         self.assertNotIn("latest", backend.tags)
 
+    def test_original_source_and_runtime_conflicts_are_rejected(self):
+        for field, value in (("release_source_commit", "d" * 40), ("agent_server_version", "unknown")):
+            backend = Backend("after_intent")
+            with self.assertRaises(ConnectionError):
+                promotion.reconcile(self.state, backend, lambda s: None)
+            with self.assertRaises(AssertionError):
+                promotion.reconcile(dict(self.state, **{field: value}), backend, lambda s: None)
+            self.assertNotIn("latest", backend.tags)
+
     def test_newer_release_blocks_stale_latest(self):
         backend = Backend()
         backend.releases = [{"tag_name": "v1.0.1"}]
         with self.assertRaises(AssertionError):
             promotion.reconcile(self.state, backend, lambda s: None)
         self.assertEqual(backend.tags, {})
+
+    def test_unowned_latest_cannot_be_replaced(self):
+        backend = Backend()
+        backend.tags["latest"] = "unknown"
+        with self.assertRaisesRegex(AssertionError, "Unowned"):
+            promotion.reconcile(self.state, backend, lambda s: None)
+        self.assertEqual(backend.tags["latest"], "unknown")
 
     def test_freshness_rechecked_before_latest(self):
         backend = Backend()

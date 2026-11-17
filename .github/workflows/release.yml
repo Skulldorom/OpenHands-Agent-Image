@@ -45,7 +45,11 @@ jobs:
           python3 tests/test-blocker-explain.py
           python3 tests/test-release-evidence.py
           python3 tests/test-release-planning.py
+          python3 tests/test-planner-execution.py
+          python3 tests/hosted-publication.py --self-test
           python3 tests/test-publication.py
+          python3 tests/test-immutable-assets.py
+          python3 tests/test-layer-security.py
           python3 tests/test-provenance.py
           python3 tests/test-automation-safety.py
           python3 tests/test-workflow-policy.py
@@ -163,6 +167,7 @@ jobs:
           python3 scripts/release.py status security_failed
           trivy image --cache-dir .cache/trivy --download-db-only
           sha256sum .cache/trivy/db/trivy.db | tee scanner-database.sha256
+          tar -czf scanner-database.tar.gz -C .cache/trivy db
           trivy version --format json > scanner-version.json
       - name: Complete unsuppressed candidate inventory
         if: steps.plan.outputs.validate == 'true'
@@ -222,15 +227,18 @@ jobs:
         with:
           retention-days: 90
           name: validation-${{ github.run_id }}-${{ github.run_attempt }}
+          include-hidden-files: true
           path: |
             functional-pass.json
             state.json
+            security/policy.json
             selection.json
             trivy.json
             package-inventory.txt
             upstream-trivy.json
             scanner-version.json
             scanner-database.sha256
+            scanner-database.tar.gz
             debian-tracker.json
             security-assessment.json
             security-assessment.md

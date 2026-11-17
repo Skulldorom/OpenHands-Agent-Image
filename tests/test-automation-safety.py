@@ -54,9 +54,10 @@ class SafetyTests(unittest.TestCase):
                 os.chdir(directory)
                 Path('security').mkdir()
                 Path('security/policy.json').write_bytes((root / 'security/policy.json').read_bytes())
-                names = evidence.FILES | {'security-assessment.json', 'security-assessment.md'}
+                names = promotion.SEALED_FILES
                 for name in names:
-                    Path(name).write_text('evidence')
+                    if name != "security/policy.json":
+                        Path(name).write_text('evidence')
                 stamp = datetime.now(timezone.utc).isoformat()
                 for name in ('trivy.json', 'upstream-trivy.json'):
                     Path(name).write_text(json.dumps({'CreatedAt': stamp, 'Trivy': {'Version': '0.69.3'}}))

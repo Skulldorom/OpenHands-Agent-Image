@@ -1,0 +1,62 @@
+name: Exact candidate security audit
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  scan:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567
+        with:
+          version: v0.69.3
+          cache: false
+      - name: Scan exact historical candidate and its actual base
+        shell: bash
+        run: |
+          candidate=$(jq -r .candidate security/historical-evidence.json)
+          docker pull "$candidate"
+          upstream=$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.base.digest" }}' "$candidate")
+          [[ "$upstream" =~ ^sha256:[a-f0-9]{64}$ ]]
+          printf '%s\n' "$upstream" > upstream-digest.txt
+          trivy image --cache-dir .cache/trivy --download-db-only
+          sha256sum .cache/trivy/db/trivy.db > scanner-database.sha256
+          tar -czf scanner-database.tar.gz -C .cache/trivy db
+          trivy version --format json > scanner-version.json
+          for target in candidate upstream; do
+            ref="$candidate"
+            if [[ "$target" == upstream ]]; then ref="ghcr.io/openhands/agent-server@$upstream"; fi
+            trivy image --cache-dir .cache/trivy --skip-db-update --skip-java-db-update \
+              --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
+              --ignorefile /dev/null --ignore-unfixed=false --list-all-pkgs \
+              --format json --output "$target-trivy.json" --timeout 20m "$ref"
+          done
+          sha256sum --check scanner-database.sha256
+          curl --fail --silent --show-error --retry 3 --max-time 120 \
+            https://security-tracker.debian.org/tracker/data/json > debian-tracker.json
+          python3 scripts/security-assessment.py --candidate candidate-trivy.json --upstream upstream-trivy.json \
+            --policy security/policy.json --tracker debian-tracker.json --candidate-ref "$candidate" \
+            --upstream-ref "ghcr.io/openhands/agent-server@$upstream" --report-only
+      - name: Preserve unsuppressed audit evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exact-candidate-security-${{ github.run_id }}
+          retention-days: 90
+          path: |
+            candidate-trivy.json
+            upstream-trivy.json
+            upstream-digest.txt
+            scanner-version.json
+            scanner-database.sha256
+            scanner-database.tar.gz
+            debian-tracker.json
+            security-assessment.json
+            security-assessment.md

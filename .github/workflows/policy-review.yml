@@ -28,7 +28,11 @@ jobs:
           python3 tests/test-blocker-explain.py
           python3 tests/test-release-evidence.py
           python3 tests/test-release-planning.py
+          python3 tests/test-planner-execution.py
+          python3 tests/hosted-publication.py --self-test
           python3 tests/test-publication.py
+          python3 tests/test-immutable-assets.py
+          python3 tests/test-layer-security.py
           python3 tests/test-provenance.py
           python3 tests/test-automation-safety.py
           python3 tests/test-workflow-policy.py

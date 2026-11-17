@@ -1,0 +1,79 @@
+name: Isolated publication integration
+
+# No PR trigger and no contents/packages write permission on the source repository.
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: 'Dedicated OWNER/publication-integration-NAME; description includes [publication-integration-only]'
+        required: true
+        type: string
+      package_prefix:
+        description: 'ghcr.io/OWNER/publication-integration-NAME; unique run suffix added'
+        required: true
+        type: string
+      cleanup:
+        description: 'Delete only recorded test IDs after success; retain failures'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publication-integration-${{ inputs.repository }}
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: publication-integration
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Offline safety checks
+        run: python3 tests/hosted-publication.py --self-test
+      - name: Real isolated GitHub and GHCR integration
+        env:
+          GH_TOKEN: ${{ secrets.PUBLICATION_INTEGRATION_TOKEN }}
+          ISOLATED_REPOSITORY: ${{ inputs.repository }}
+          ISOLATED_PACKAGE_PREFIX: ${{ inputs.package_prefix }}
+          CLEANUP: ${{ inputs.cleanup }}
+        shell: bash
+        run: |
+          # Credential helper reads the environment; no token is stored in Docker config.
+          DOCKER_CONFIG="$(mktemp -d)"
+          export DOCKER_CONFIG
+          helper_dir="$(mktemp -d)"
+          trap 'rm -rf "$DOCKER_CONFIG" "$helper_dir"' EXIT
+          export PATH="$helper_dir:$PATH"
+          printf '%s\n' '{"credHelpers":{"ghcr.io":"publication-integration"}}' > "$DOCKER_CONFIG/config.json"
+          cat > "$helper_dir/docker-credential-publication-integration" <<'PY'
+          #!/usr/bin/env python3
+          import json
+          import os
+          import sys
+          if sys.argv[1] != "get" or sys.stdin.read().strip() not in ("ghcr.io", "https://ghcr.io"):
+              sys.exit(1)
+          print(json.dumps({"Username": os.environ["REGISTRY_USER"], "Secret": os.environ["GH_TOKEN"]}))
+          PY
+          chmod 700 "$helper_dir/docker-credential-publication-integration"
+          REGISTRY_USER="$(gh api user --jq .login)"
+          export REGISTRY_USER
+          args=()
+          if [[ "$CLEANUP" == "true" ]]; then args+=(--cleanup); fi
+          python3 tests/hosted-publication.py --execute \
+            --repository "$ISOLATED_REPOSITORY" \
+            --package-prefix "$ISOLATED_PACKAGE_PREFIX" "${args[@]}"
+      - name: Retain created-ID ledger
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: publication-integration-ledger-${{ github.run_id }}-${{ github.run_attempt }}
+          path: publication-integration-report.json
+          if-no-files-found: ignore
+          retention-days: 14

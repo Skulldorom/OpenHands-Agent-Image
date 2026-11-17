@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Resolve upstream contracts and plan/promote only validated registry artifacts."""
 import hashlib
+import base64
 import importlib.util
 import json
 import io
@@ -24,8 +25,12 @@ def request(url, headers=None):
         return response.read(), response.headers
 
 
-def registry(repo, reference):
-    token = json.loads(request("https://ghcr.io/token?scope=repository:" + repo + ":pull")[0])["token"]
+def registry(repo, reference, authenticated=False):
+    auth = {}
+    if authenticated:
+        credential = os.environ["GH_TOKEN"]
+        auth["Authorization"] = "Basic " + base64.b64encode(("token:" + credential).encode()).decode()
+    token = json.loads(request("https://ghcr.io/token?scope=repository:" + repo + ":pull", auth)[0])["token"]
     headers = {"Authorization": "Bearer " + token, "Accept": ACCEPT}
     raw, meta = request(f"https://ghcr.io/v2/{repo}/manifests/{reference}", headers)
     digest = meta["Docker-Content-Digest"]
@@ -143,7 +148,7 @@ def plan():
     assert version in approved, f"Unapproved Agent Server {version}; review compatibility.json and runtime contract tests"
     identities = fingerprints(upstream)
     records = sorted(release_records(), key=lambda r: tuple(map(int, r["tag_name"][1:].split("."))))
-    states = [journal_state(r) for r in records]
+    states = [dict(journal_state(r), status="built" if r["draft"] else "published") for r in records]
     old = states[-1] if states else None
     pending = [journal_state(r) for r in records if r["draft"]]
     assert len(pending) <= 1, "Multiple interrupted releases require reconciliation"
@@ -159,7 +164,9 @@ def plan():
     release_version = pending[0]["version"] if pending else (same["version"] if same and not explicit_bump else next_version(old["version"] if old else None, bump))
     current = identities["image"]
     candidate = same["image_digest"] if same else retained_marker(current, upstream)
-    unchanged = bool(same and same.get("fingerprints") == identities and not pending and not explicit_bump)
+    unchanged = bool(same and same["status"] == "published" and same.get("fingerprints") == identities and not pending and not explicit_bump
+                     and os.environ.get("GITHUB_EVENT_NAME") not in {"schedule", "workflow_dispatch"}
+                     and os.environ.get("SECURITY_REASSESS") != "true")
     # Check latest too: a completed immutable release may still need alias repair.
     if unchanged:
         try:
@@ -175,8 +182,17 @@ def plan():
     if candidate:
         state["image_digest"] = candidate
     write_state(state)
+    if candidate:
+        verify_candidate(candidate)
+    prior = same or (dict(state, status="built") if candidate else None)
+    action = candidate_action(prior, identities, upstream)
+    if unchanged:
+        action = "skip"
+    state["action"] = action
+    write_state(state)
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-        for key, value in {"build": str(not candidate and not unchanged).lower(), "validate": str(not unchanged).lower(),
+        for key, value in {"build": str(action == "build").lower(), "validate": str(action != "skip").lower(),
+                           "action": action,
                            "version": release_version, "upstream": upstream, "blocked": "",
                            "candidate_key": candidate_key(current, upstream), "candidate": candidate or ""}.items():
             output.write(f"{key}={value}\n")

@@ -10,6 +10,19 @@ import tarfile
 CREDENTIAL = re.compile(rb"(?P<private_key>-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----)|(?P<github_token>gh[pousr]_[A-Za-z0-9]{36,})|(?P<github_pat>github_pat_[A-Za-z0-9_]{50,})|(?P<aws_access_key>AKIA[0-9A-Z]{16})")
 
 
+# A PEM boundary alone is a public format constant, not private key material.
+# Work on bytes, including binary files; never discard NULs or decoding errors.
+# Normalize JSON/JavaScript escaped line endings so serialized keys still block.
+PEM_PAYLOAD = re.compile(rb"[ \t\r\n]+(?:(?:[A-Za-z0-9+/=][ \t\r\n]*){16}|Proc-Type:[ \t]*4,ENCRYPTED)")
+
+
+def credential_matches(raw):
+    normalized = raw.replace(b"\\r", b"\r").replace(b"\\n", b"\n")
+    for match in CREDENTIAL.finditer(normalized):
+        if match.lastgroup != "private_key" or PEM_PAYLOAD.match(normalized, match.end()):
+            yield match
+
+
 def check_layers(stream):
     count = 0
     with tarfile.open(fileobj=stream, mode="r|") as archive:
@@ -34,27 +47,9 @@ def check_layers(stream):
                         assert not raw.strip(), f"Credential file recoverable in layer {count}: {name}"
                     elif entry.isfile() and entry.size <= 1024 * 1024 and name.startswith(("home/", "root/", "tmp/", "run/")):
                         raw = layer.extractfile(entry).read()
-                        match = CREDENTIAL.search(raw)
-                        if match:
-                            # Only categorical diagnostics: never matched bytes or context.
-                            diagnostic = {
-                                "archive_member": member.name,
-                                "rule": match.lastgroup,
-                                "pem_footer_present": b"-----END PRIVATE KEY-----" in raw,
-                                "pem_payload_after_header": bool(re.match(rb"[ \r\n\t]+[A-Za-z0-9+/=]{32,}", raw[match.end():])),
-                                "marker_count": len(list(CREDENTIAL.finditer(raw))),
-                                "pem_payload_after_escaped_header": bool(re.match(rb"[ \r\n\t]+[A-Za-z0-9+/=]{16,}", raw[match.end():].replace(b"\\n", b"\n").replace(b"\\r", b"\r"))),
-                                "footer_distance": raw.find(b"-----END PRIVATE KEY-----", match.end()) - match.end(),
-                                "next_byte_printable": bool(raw[match.end():match.end()+1]) and 32 <= raw[match.end()] <= 126,
-                                "length": len(match.group()),
-                                "offset": match.start(),
-                                "file_size": len(raw),
-                                "file_contains_nul": b"\x00" in raw,
-                                "left_ascii_word": match.start() > 0 and raw[match.start()-1:match.start()].isalnum(),
-                                "right_ascii_word": raw[match.end():match.end()+1].isalnum(),
-                                "distinct_match_bytes": len(set(match.group())),
-                            }
-                            raise AssertionError(f"Credential pattern recoverable in layer {count}: {name}; " + json.dumps(diagnostic, sort_keys=True))
+                        for match in credential_matches(raw):
+                            # Rule and location only; never matched bytes or context.
+                            raise AssertionError(f"Credential pattern recoverable in layer {count}: {name}; rule={match.lastgroup}; archive_member={member.name}")
     assert count, "No Docker archive layers inspected"
     return count
 

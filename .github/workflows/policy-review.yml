@@ -33,6 +33,7 @@ jobs:
           python3 tests/test-publication.py
           python3 tests/test-immutable-assets.py
           python3 tests/test-layer-security.py
+          python3 tests/test-inventory-grouping.py
           python3 tests/test-provenance.py
           python3 tests/test-automation-safety.py
           python3 tests/test-workflow-policy.py
@@ -86,6 +87,7 @@ jobs:
           candidate = inspect("local-pr-validation")
           assert candidate[:len(base)] == base, "Candidate base layers differ"
           print("Upstream diff IDs: " + json.dumps(base))
-          print(f"Verified upstream layer prefix: {len(base)} of {len(candidate)} layers; layer 7 inherited={len(base) >= 7}")
+          print(f"Verified upstream layer prefix: {len(base)} of {len(candidate)} layers; exact upstream prefix verified")
           PYCODE
+          timeout 15m python3 tests/test-image-layers.py "$upstream"
           timeout 15m python3 tests/test-image-layers.py local-pr-validation

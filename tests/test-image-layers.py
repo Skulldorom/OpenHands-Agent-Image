@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Inspect every saved layer, including files hidden by later whiteouts."""
 import re
+import json
 import subprocess
 import sys
 import tarfile
 
 
-CREDENTIAL = re.compile(rb"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,}|AKIA[0-9A-Z]{16}")
+CREDENTIAL = re.compile(rb"(?P<private_key>-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----)|(?P<github_token>gh[pousr]_[A-Za-z0-9]{36,})|(?P<github_pat>github_pat_[A-Za-z0-9_]{50,})|(?P<aws_access_key>AKIA[0-9A-Z]{16})")
 
 
 def check_layers(stream):
@@ -33,7 +34,20 @@ def check_layers(stream):
                         assert not raw.strip(), f"Credential file recoverable in layer {count}: {name}"
                     elif entry.isfile() and entry.size <= 1024 * 1024 and name.startswith(("home/", "root/", "tmp/", "run/")):
                         raw = layer.extractfile(entry).read()
-                        assert not CREDENTIAL.search(raw), f"Credential pattern recoverable in layer {count}: {name}"
+                        match = CREDENTIAL.search(raw)
+                        if match:
+                            # Only categorical diagnostics: never matched bytes or context.
+                            diagnostic = {
+                                "rule": match.lastgroup,
+                                "length": len(match.group()),
+                                "offset": match.start(),
+                                "file_size": len(raw),
+                                "file_contains_nul": b"\x00" in raw,
+                                "left_ascii_word": match.start() > 0 and raw[match.start()-1:match.start()].isalnum(),
+                                "right_ascii_word": raw[match.end():match.end()+1].isalnum(),
+                                "distinct_match_bytes": len(set(match.group())),
+                            }
+                            raise AssertionError(f"Credential pattern recoverable in layer {count}: {name}; " + json.dumps(diagnostic, sort_keys=True))
     assert count, "No Docker archive layers inspected"
     return count
 

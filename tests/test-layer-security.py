@@ -111,6 +111,18 @@ class LayerTests(unittest.TestCase):
         self.assertTrue(record['elf_scope']['executable_section'])
         self.assertEqual(record['file_offset'], 128)
 
+    def test_aws_id_substrings_are_classified_but_standalone_ids_block(self):
+        identifier = b'AKIA' + b'A2'*8
+        for raw in (b'ABC'+identifier+b'XYZ', identifier+b'X', b'X'+identifier):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertIsNone(layers.scan_file(io.BytesIO(raw)))
+            self.assertIn('substring_of_longer_alphanumeric_sequence', output.getvalue())
+            self.assertNotIn(identifier.decode(), output.getvalue())
+        for raw in (identifier, b'key='+identifier, b'\x00'+identifier+b'\x00', b'"'+identifier+b'"'):
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(layers.scan_file(io.BytesIO(raw), chunk_size=11), 'aws_access_key')
+
     def test_all_matches_checked_after_harmless_literal(self):
         raw = b'\x00-----BEGIN PRIVATE KEY-----\x00' + b'ghp_' + b'Z' * 36
         with self.assertRaisesRegex(AssertionError, 'rule=github_token'):

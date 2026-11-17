@@ -9,12 +9,14 @@ import sys
 import tarfile
 
 
-CREDENTIAL = re.compile(rb"(?P<private_key>-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----)|(?P<github_token>gh[pousr]_[A-Za-z0-9]{36,})|(?P<github_pat>github_pat_[A-Za-z0-9_]{50,})|(?P<aws_access_key>AKIA[0-9A-Z]{16})")
+CREDENTIAL = re.compile(rb"(?P<private_key>-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----)|(?P<github_token>gh[pousr]_[A-Za-z0-9]{36,})|(?P<github_pat>github_pat_[A-Za-z0-9_]{50,})|(?P<aws_access_key>(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![A-Za-z0-9]))")
 
 
 # A PEM boundary alone is a public format constant, not private key material.
 # Work on bytes, including binary files; never discard NULs or decoding errors.
 # Normalize JSON/JavaScript escaped line endings so serialized keys still block.
+AWS_SUBSTRING = re.compile(rb"AKIA[0-9A-Z]{16}")
+
 PEM_PAYLOAD = re.compile(rb"[ \t\r\n]+(?:(?:[A-Za-z0-9+/=][ \t\r\n]*){16}|Proc-Type:[ \t]*4,ENCRYPTED)")
 
 
@@ -78,6 +80,14 @@ def scan_file(source, credential_file=False, chunk_size=1024 * 1024):
                               "elf_scope": elf_match_scope(source, header, offset),
                               "documented_aws_example": match.group() == b"AKIAIOSFODNN7EXAMPLE"}))
             return match.lastgroup
+        # Report a classified lexical collision rather than treating an arbitrary
+        # 20-byte slice of a longer identifier/data sequence as an AWS key ID.
+        for candidate in AWS_SUBSTRING.finditer(raw):
+            before = raw[max(0, candidate.start()-1):candidate.start()]
+            after = raw[candidate.end():candidate.end()+1]
+            if (before and re.fullmatch(rb"[A-Za-z0-9]", before)) or (after and re.fullmatch(rb"[A-Za-z0-9]", after)):
+                print(json.dumps({"credential_rule": "aws_access_key", "classification": "substring_of_longer_alphanumeric_sequence",
+                                  "match_sha256": hashlib.sha256(candidate.group()).hexdigest()}))
         tail = raw[-4096:]
         normalized = raw.replace(b"\\r", b"\r").replace(b"\\n", b"\n")
         for candidate in CREDENTIAL.finditer(normalized):

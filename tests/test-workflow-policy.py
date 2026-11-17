@@ -5,6 +5,9 @@ import re
 import subprocess
 import unittest
 import yaml
+import os
+import json
+import tempfile
 from types import SimpleNamespace
 
 
@@ -62,6 +65,33 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertEqual(integration['permissions'], {'contents': 'read'})
         self.assertTrue(any('docker build --tag local-pr-validation' in s.get('run', '') for s in integration['steps']))
         self.assertFalse(any('push: true' in str(s) or 'promotion.py publish' in s.get('run', '') for s in integration['steps']))
+
+    def test_actual_historical_workflow_script_propagates_reassessment_failure(self):
+        workflow = yaml.safe_load(Path('.github/workflows/policy-review.yml').read_text())
+        step = next(s for s in workflow['jobs']['policy']['steps'] if s.get('name', '').startswith('Reassess retained'))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fakebin = root / 'bin'
+            fakebin.mkdir()
+            for name, body in {'jq': '#!/bin/sh\necho 1\n', 'python3': '#!/bin/sh\ncase "$1" in tests/*) exit 23;; *) exit 0;; esac\n'}.items():
+                path = fakebin / name
+                path.write_text(body)
+                path.chmod(0o755)
+            env = dict(os.environ, PATH=str(fakebin)+':'+os.environ['PATH'], GITHUB_STEP_SUMMARY=str(root/'summary'))
+            result = subprocess.run(['bash', '-e', '-c', step['run']], cwd=root, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 23)
+            self.assertFalse((root/'summary').exists())
+
+    def test_actual_security_audit_gate_blocks_rejected_assessment(self):
+        workflow = yaml.safe_load(Path('.github/workflows/security-audit.yml').read_text())
+        step = next(s for s in workflow['jobs']['scan']['steps'] if s.get('name') == 'Require exact-upstream custom security policy')
+        self.assertFalse(step.get('continue-on-error', False))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'security-assessment.json'
+            for accepted in (False, True):
+                path.write_text(json.dumps({'pass': accepted}))
+                result = subprocess.run(['bash', '-e', '-c', step['run']], cwd=directory, capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, accepted)
 
     def test_automatic_publisher_is_gated_and_never_rebuilds(self):
         workflow = yaml.safe_load(Path('.github/workflows/release.yml').read_text())

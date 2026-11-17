@@ -59,13 +59,18 @@ def recheck(selection, now):
         assert hashlib.sha256(Path(name).read_bytes()).hexdigest() == digest, "Evidence changed after assessment"
     validate_fresh_scans(selection, now)
 
+def verify_bundle_digest(raw, recorded, workflow_output):
+    actual = "sha256:" + hashlib.sha256(raw).hexdigest()
+    expected = workflow_output if workflow_output.startswith("sha256:") else "sha256:" + workflow_output
+    assert actual == recorded == expected, "Validation artifact digest mismatch"
+
 def bundle():
     run, attempt = int(os.environ["GITHUB_RUN_ID"]), int(os.environ["GITHUB_RUN_ATTEMPT"])
     artifacts = evidence.api(f"actions/runs/{run}/artifacts?per_page=100")["artifacts"]
     selected = [a for a in artifacts if a["name"] == f"validation-{run}-{attempt}"]
     assert len(selected) == 1 and not selected[0]["expired"]
     raw = subprocess.check_output(["gh", "api", f"repos/{release.REPO}/actions/artifacts/{selected[0]['id']}/zip"])
-    assert "sha256:" + hashlib.sha256(raw).hexdigest() == selected[0]["digest"] == os.environ["BUNDLE_DIGEST"]
+    verify_bundle_digest(raw, selected[0]["digest"], os.environ["BUNDLE_DIGEST"])
     allowed = SEALED_FILES | {"selection.json"}
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         assert len(archive.namelist()) == len(set(archive.namelist()))

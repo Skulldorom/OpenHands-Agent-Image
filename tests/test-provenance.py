@@ -26,6 +26,15 @@ class ProvenanceTests(unittest.TestCase):
                            "agent_server_version": "1.62.0", "repository": evidence.REPO, "run_id": 123,
                            "run_attempt": 1, "tests": {test: "passed" for test in evidence.TESTS}}
 
+    def test_upload_artifact_raw_digest_matches_api_prefixed_digest(self):
+        raw = b"sealed evidence"
+        digest = hashlib.sha256(raw).hexdigest()
+        promotion.verify_bundle_digest(raw, "sha256:" + digest, digest)
+        promotion.verify_bundle_digest(raw, "sha256:" + digest, "sha256:" + digest)
+        for data, recorded, output in [(b"altered", "sha256:"+digest, digest), (raw, digest, digest), (raw, "sha256:"+digest, "wrong")]:
+            with self.assertRaises(AssertionError):
+                promotion.verify_bundle_digest(data, recorded, output)
+
     def test_valid_run_and_complete_functional_evidence(self):
         evidence.validate_run(self.run, 1)
         evidence.validate_functional(self.functional, self.state, self.run, self.candidate)

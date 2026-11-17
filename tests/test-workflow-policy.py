@@ -27,6 +27,19 @@ class WorkflowPolicyTests(unittest.TestCase):
                 for job in workflow['jobs'].values():
                     self.assertNotIn('environment', job)
 
+    def test_sandbox_publication_uses_only_repository_token_and_isolated_targets(self):
+        workflow = yaml.safe_load(Path('.github/workflows/publication-integration.yml').read_text())
+        job = workflow['jobs']['integration']
+        self.assertEqual(workflow['permissions'], {'contents': 'read'})
+        self.assertEqual(job['permissions'], {'contents': 'write', 'packages': 'write'})
+        self.assertIn("startsWith(github.event.repository.name, 'publication-integration-')", job['if'])
+        self.assertIn('inputs.repository == github.repository', job['if'])
+        live = next(step for step in job['steps'] if step.get('name') == 'Real isolated GitHub and GHCR integration')
+        self.assertEqual(live['env']['GH_TOKEN'], '${{ github.token }}')
+        self.assertEqual(live['env']['REGISTRY_USER'], '${{ github.repository_owner }}')
+        self.assertNotIn('secrets.', str(workflow))
+        self.assertNotIn('gh api user ', live['run'])
+
     def test_automatic_publisher_is_gated_and_never_rebuilds(self):
         workflow = yaml.safe_load(Path('.github/workflows/release.yml').read_text())
         publisher = workflow['jobs']['publish']

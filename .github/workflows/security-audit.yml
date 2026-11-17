@@ -82,25 +82,7 @@ jobs:
           SH
       - name: Inspect newly released Compose vendor artifact without running it
         shell: bash
-        run: |
-          curl --fail --silent --show-error --retry 3 --max-time 120 \
-            https://github.com/docker/compose/releases/download/v5.7.2/docker-compose-linux-x86_64 \
-            --output /tmp/vendor-compose-5.7.2
-          python3 - <<'PY'
-          import hashlib
-          import json
-          from pathlib import Path
-          raw = Path("/tmp/vendor-compose-5.7.2").read_bytes()
-          expected = "e14235d9c622c5bd57eb8adeed4a0f7308c7f3862e6812dd843f6fe27f1307cc"
-          actual = hashlib.sha256(raw).hexdigest()
-          report = {"release": "v5.7.2", "expected_sha256": expected, "download_sha256": actual,
-                    "download_size": len(raw), "verified": bool(raw) and actual == expected,
-                    "source": "GitHub official release asset metadata"}
-          Path("reachability/vendor-compose-5.7.2-verification.json").write_text(json.dumps(report, indent=2) + "\n")
-          assert report["verified"], "Vendor binary integrity check failed; module inspection is blocked"
-          PY
-          go version -m /tmp/vendor-compose-5.7.2 > reachability/vendor-compose-5.7.2.modules.txt
-          rm /tmp/vendor-compose-5.7.2
+        run: python3 scripts/verify-compose-vendor.py
       - name: Preserve unsuppressed audit evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

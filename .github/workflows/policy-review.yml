@@ -34,6 +34,7 @@ jobs:
           python3 tests/test-immutable-assets.py
           python3 tests/test-layer-security.py
           python3 tests/test-inventory-grouping.py
+          python3 tests/test-compose-vendor.py
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           "$(go env GOPATH)/bin/actionlint"
           python3 tests/test-provenance.py

@@ -101,10 +101,10 @@ class WorkflowPolicyTests(unittest.TestCase):
             root = Path(directory)
             fakebin = root / 'bin'
             fakebin.mkdir()
-            (root/'Dockerfile').write_text('ARG UPSTREAM_IMAGE=upstream-fixture\\n')
+            (root/'Dockerfile').write_text('ARG UPSTREAM_IMAGE=upstream-fixture\n')
             commands = {
-                'docker': '#!/bin/sh\\nexit 0\\n',
-                'python3': '#!/bin/sh\\nif [ "$1" = tests/test-image-layers.py ]; then echo "$2" >> "$CALLS"; if [ "$2" = local-pr-validation ]; then exit "$CANDIDATE_FAIL"; else exit "$UPSTREAM_FAIL"; fi; fi\\nexit 0\\n',
+                'docker': '#!/bin/sh\nexit 0\n',
+                'python3': '#!/bin/sh\nif [ "$1" = tests/test-image-layers.py ]; then echo "$2" >> "$CALLS"; if [ "$2" = local-pr-validation ]; then exit "$CANDIDATE_FAIL"; else exit "$UPSTREAM_FAIL"; fi; fi\nexit 0\n',
             }
             for name, body in commands.items():
                 path = fakebin/name

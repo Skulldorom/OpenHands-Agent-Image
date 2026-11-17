@@ -27,7 +27,7 @@ class PlannerExecutionTests(unittest.TestCase):
         subprocess.run(['git', 'add', '.'], check=True)
         subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'fixture'], check=True)
         self.commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-        self.env = patch.dict(os.environ, GITHUB_SHA=self.commit, GITHUB_OUTPUT=str(Path.cwd() / 'output'), BUMP='auto', GITHUB_EVENT_NAME='push', SECURITY_REASSESS='false')
+        self.env = patch.dict(os.environ, GITHUB_SHA=self.commit, GITHUB_OUTPUT=str(Path.cwd() / 'output'), BUMP='auto', GITHUB_EVENT_NAME='schedule', GITHUB_REF='refs/heads/main', SECURITY_REASSESS='false')
         self.env.start()
         self.base, self.digest = 'sha256:' + 'a'*64, 'sha256:' + 'b'*64
         self.identities = release.fingerprints(self.base)
@@ -55,7 +55,7 @@ class PlannerExecutionTests(unittest.TestCase):
     def run_plan(self):
         # Only network APIs/signature transport are substituted; planner, Git
         # fingerprinting, candidate verification and output files remain real.
-        with patch.object(release, 'registry', side_effect=self.registry), patch.object(release, 'request', return_value=(b'version = "1.62.0"', {})), patch.object(release, 'release_records', return_value=self.records), patch.object(evidence, 'verify_build_signature') as signature:
+        with patch.object(release, 'registry', side_effect=self.registry), patch.object(release, 'request', return_value=(b'version = "1.62.0"', {})), patch.object(release, 'release_records', return_value=self.records), patch.object(release, 'retained_marker', return_value=self.marker), patch.object(evidence, 'verify_build_signature') as signature:
             release.plan()
             return json.loads(Path('state.json').read_text()), signature.call_count
 
@@ -75,18 +75,50 @@ class PlannerExecutionTests(unittest.TestCase):
         self.assertEqual(state['action'], 'validate')
         self.assertEqual(signatures, 1)
 
-    def test_published_skips_but_schedule_and_manual_reassess(self):
+    def test_schedule_unchanged_and_docs_only_reuses_with_fresh_validation(self):
         self.published()
-        state, signatures = self.run_plan()
-        self.assertEqual(state['action'], 'skip')
-        self.assertEqual(signatures, 1)
-        for event in ('schedule', 'workflow_dispatch'):
-            os.environ['GITHUB_EVENT_NAME'] = event
+        for docs in ('', 'documentation only'):
+            Path('README.md').write_text(docs)
             state, signatures = self.run_plan()
             self.assertEqual(state['action'], 'validate')
             self.assertEqual(state['image_digest'], self.digest)
             self.assertEqual(signatures, 1)
-            self.assertEqual(state['version'], '1.0.0')
+
+    def test_main_push_and_manual_always_build_even_docs_only(self):
+        self.published()
+        self.marker = self.digest
+        for event in ('push', 'workflow_dispatch'):
+            os.environ['GITHUB_EVENT_NAME'] = event
+            for docs in ('', 'documentation only'):
+                Path('README.md').write_text(docs)
+                state, signatures = self.run_plan()
+                self.assertEqual(state['action'], 'build')
+                self.assertNotIn('image_digest', state)
+                self.assertEqual(signatures, 0)
+                outputs = dict(line.split('=', 1) for line in Path('output').read_text().splitlines())
+                self.assertEqual((outputs['build'], outputs['validate']), ('true', 'true'))
+                self.assertEqual(state['commit'], self.commit)
+                self.assertEqual(state['upstream_digest'], self.base)
+
+    def test_schedule_changed_upstream_builds(self):
+        self.published()
+        self.base = 'sha256:' + 'c'*64
+        state, _ = self.run_plan()
+        self.assertEqual(state['action'], 'build')
+
+    def test_minor_major_and_commit_directive_remain_explicit(self):
+        self.published()
+        for bump, expected in [('patch', '1.0.1'), ('minor', '1.1.0'), ('major', '2.0.0')]:
+            os.environ.update(BUMP=bump, GITHUB_EVENT_NAME='workflow_dispatch')
+            state, _ = self.run_plan()
+            self.assertEqual(state['version'], expected)
+            self.assertTrue(state['explicit_bump'])
+            self.assertEqual(state['action'], 'build')
+        os.environ['BUMP'] = 'auto'
+        subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'release:minor'], check=True)
+        state, _ = self.run_plan()
+        self.assertTrue(state['explicit_bump'])
+        self.assertEqual(state['version'], '1.1.0')
 
     def test_interrupted_publication_reuses_reserved_version(self):
         self.published(draft=True)

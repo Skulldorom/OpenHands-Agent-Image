@@ -90,6 +90,21 @@ def candidate_key(current, upstream):
     return "content-" + hashlib.sha256((current + "\0" + upstream).encode()).hexdigest()
 
 def retained_marker(current, upstream):
+    # Small per-run journals retain failed validations without moving any OCI
+    # tag. Expired journals cause a rebuild, never trust in missing provenance.
+    prefix = "candidate-state-" + candidate_key(current, upstream) + "-"
+    artifacts = json.loads(gh("api", f"repos/{REPO}/actions/artifacts?per_page=100"))["artifacts"]
+    for artifact in sorted(artifacts, key=lambda a: a["id"], reverse=True):
+        if artifact["expired"] or not artifact["name"].startswith(prefix):
+            continue
+        raw = subprocess.check_output(["gh", "api", f"repos/{REPO}/actions/artifacts/{artifact['id']}/zip"])
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            assert archive.namelist() == ["state.json"]
+            assert archive.getinfo("state.json").file_size < 1_000_000
+            state = json.loads(archive.read("state.json"))
+        assert reusable_candidate(state, current, upstream), "Invalid retained candidate journal"
+        return state["image_digest"]
+    # Compatibility with candidates retained before run-specific journals.
     try:
         return registry("skulldorom/openhands-agent", candidate_key(current, upstream))[0]
     except urllib.error.HTTPError as error:
@@ -148,36 +163,35 @@ def plan():
     assert version in approved, f"Unapproved Agent Server {version}; review compatibility.json and runtime contract tests"
     identities = fingerprints(upstream)
     records = sorted(release_records(), key=lambda r: tuple(map(int, r["tag_name"][1:].split("."))))
-    states = [dict(journal_state(r), status="built" if r["draft"] else "published") for r in records]
+    owner_fields = {"version", "commit", "release_source_commit", "upstream_digest", "image_digest", "fingerprints", "fingerprint", "agent_server_version"}
+    states = [dict({k: v for k, v in journal_state(r).items() if k in owner_fields},
+                   status="built" if r["draft"] else "published") for r in records]
     old = states[-1] if states else None
     pending = [journal_state(r) for r in records if r["draft"]]
     assert len(pending) <= 1, "Multiple interrupted releases require reconciliation"
-    if pending:
-        assert pending[0]["fingerprints"]["image"] == identities["image"], "Interrupted release uses superseded content/upstream; review draft before proceeding"
     same = old if old and old["fingerprints"]["image"] == identities["image"] else None
     bump = os.environ.get("BUMP", "auto")
     explicit_bump = bump != "auto"
     assert bump in {"auto", "patch", "minor", "major"}, "Invalid release increment"
     if bump == "auto":
         messages = subprocess.check_output(["git", "log", old["commit"] + "..HEAD", "--format=%B"], text=True) if old else ""
+        explicit_bump = bool(re.search(r"(?m)^release:(minor|major)\s*$", messages))
         bump = "major" if re.search(r"(?m)^release:major\s*$", messages) else "minor" if re.search(r"(?m)^release:minor\s*$", messages) else "patch"
-    release_version = pending[0]["version"] if pending else (same["version"] if same and not explicit_bump else next_version(old["version"] if old else None, bump))
+    force_build = (os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" or
+                   (os.environ.get("GITHUB_EVENT_NAME") == "push" and
+                    os.environ.get("GITHUB_REF") == "refs/heads/main"))
+    if pending and not force_build:
+        assert pending[0]["fingerprints"]["image"] == identities["image"], "Interrupted release uses superseded content/upstream; review draft before proceeding"
+    release_version = pending[0]["version"] if pending else next_version(old["version"] if old else None, bump)
     current = identities["image"]
-    candidate = same["image_digest"] if same else retained_marker(current, upstream)
-    unchanged = bool(same and same["status"] == "published" and same.get("fingerprints") == identities and not pending and not explicit_bump
-                     and os.environ.get("GITHUB_EVENT_NAME") not in {"schedule", "workflow_dispatch"}
-                     and os.environ.get("SECURITY_REASSESS") != "true")
-    # Check latest too: a completed immutable release may still need alias repair.
-    if unchanged:
-        try:
-            unchanged = registry("skulldorom/openhands-agent", "latest")[0] == candidate
-        except urllib.error.HTTPError as error:
-            if error.code != 404:
-                raise
-            unchanged = False
+    # Forced builds never select or depend on a retained candidate.
+    candidate = None if force_build else (pending[0]["image_digest"] if pending else
+                 retained_marker(current, upstream) or (same["image_digest"] if same else None))
     state = {"version": release_version, "upstream_digest": upstream, "upstream_source": sha,
              "agent_server_version": version, "fingerprint": current, "fingerprints": identities,
-             "commit": os.environ["GITHUB_SHA"], "release_source_commit": same.get("release_source_commit", same["commit"]) if same and release_version == same["version"] else os.environ["GITHUB_SHA"],
+             "commit": os.environ["GITHUB_SHA"], "release_source_commit": os.environ["GITHUB_SHA"],
+             "bump": bump, "explicit_bump": explicit_bump, "pending_release": pending[0] if pending else None,
+             "previous_approved": next((s for s in reversed(states) if s["status"] == "published"), None),
              "status": "built" if candidate else "build_failed"}
     if candidate:
         state["image_digest"] = candidate
@@ -185,9 +199,9 @@ def plan():
     if candidate:
         verify_candidate(candidate)
     prior = same or (dict(state, status="built") if candidate else None)
-    action = candidate_action(prior, identities, upstream)
-    if unchanged:
-        action = "skip"
+    action = "build" if force_build else candidate_action(prior, identities, upstream)
+    # Scheduled reuse always gets fresh functional/layer/security evidence. It
+    # must not skip alias repair or an interrupted release merely for equal bytes.
     state["action"] = action
     write_state(state)
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
@@ -196,6 +210,44 @@ def plan():
                            "version": release_version, "upstream": upstream, "blocked": "",
                            "candidate_key": candidate_key(current, upstream), "candidate": candidate or ""}.items():
             output.write(f"{key}={value}\n")
+
+def select_release(state, records=None):
+    """Publication intent is selected only after exact-digest validation succeeds."""
+    assert state["status"] == "validated", "Candidate is not validated"
+    if records is not None:
+        ordered = sorted(records, key=lambda r: tuple(map(int, r["tag_name"][1:].split("."))))
+        drafts = [journal_state(r) for r in ordered if r["draft"]]
+        assert len(drafts) <= 1, "Multiple interrupted releases require reconciliation"
+        approved = next((journal_state(r) for r in reversed(ordered) if not r["draft"]), None)
+        # Publication owns the lock here. Re-read reservations/version ownership
+        # rather than racing with a version calculated before a long build.
+        state = dict(state, pending_release=drafts[0] if drafts else None, previous_approved=approved,
+                     version=drafts[0]["version"] if drafts else next_version(approved["version"] if approved else None, state["bump"]))
+    pending = state.get("pending_release")
+    previous = state.get("previous_approved")
+    if pending:
+        assert pending["image_digest"] == state["image_digest"], "Pending release must be recovered before another candidate can publish; run scheduled reconciliation"
+        owner = pending
+    elif previous and previous["image_digest"] == state["image_digest"] and not state.get("explicit_bump"):
+        owner = previous
+    else:
+        return state
+    # Reassessments append fresh evidence; original release source and approval
+    # commitment are never replaced, even on a byte-identical new build.
+    return dict(state, version=owner["version"],
+                release_source_commit=owner.get("release_source_commit", owner["commit"]))
+
+
+def assert_candidate_tag_absent():
+    tag = "candidate-" + os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"]
+    try:
+        registry("skulldorom/openhands-agent", tag, authenticated=True)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return
+        raise
+    raise AssertionError("Immutable candidate tag already exists: " + tag)
+
 
 def verify_candidate(digest):
     import evidence
@@ -225,5 +277,6 @@ def validate_publication_evidence(state, assessment, functional, policy, digest)
     assert all(r["approved_by"] in policy["acceptance_approvers"] for r in policy["exceptions"])
 
 if __name__ == "__main__":
-    {"plan": plan, "record-candidate": lambda: record_candidate(sys.argv[2]),
+    {"plan": plan, "assert-candidate-tag-absent": assert_candidate_tag_absent,
+     "record-candidate": lambda: record_candidate(sys.argv[2]),
      "status": lambda: record_status(sys.argv[2]), "verify-candidate": lambda: verify_candidate(sys.argv[2])}[sys.argv[1]]()

@@ -5,6 +5,7 @@ import re
 import subprocess
 import unittest
 import yaml
+from types import SimpleNamespace
 
 
 class WorkflowPolicyTests(unittest.TestCase):
@@ -40,6 +41,28 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertNotIn('secrets.', str(workflow))
         self.assertNotIn('gh api user ', live['run'])
 
+    def test_real_workflow_conditions_for_trigger_build_and_failed_security(self):
+        workflow = yaml.safe_load(Path('.github/workflows/release.yml').read_text())
+        def enabled(condition, **context):
+            expression = condition.replace('&&', ' and ').replace('||', ' or ')
+            return eval(expression, {'__builtins__': {}}, context)
+        build = next(s for s in workflow['jobs']['validate']['steps'] if s.get('id') == 'build')
+        for event in ('push', 'workflow_dispatch', 'schedule', 'pull_request'):
+            github = SimpleNamespace(ref='refs/pull/1/merge' if event == 'pull_request' else 'refs/heads/main', event_name=event)
+            runnable = enabled(workflow['jobs']['validate']['if'], github=github)
+            self.assertEqual(runnable, event != 'pull_request')
+            for plan_build in ('true', 'false'):
+                steps = SimpleNamespace(plan=SimpleNamespace(outputs=SimpleNamespace(build=plan_build)))
+                self.assertEqual(enabled(build['if'], steps=steps), plan_build == 'true')
+            for result, eligible, expected in [('failure', 'false', False), ('failure', 'true', False), ('success', 'false', False), ('success', 'true', True)]:
+                needs = SimpleNamespace(validate=SimpleNamespace(result=result, outputs=SimpleNamespace(eligible=eligible)))
+                self.assertEqual(enabled(workflow['jobs']['publish']['if'], needs=needs), expected)
+        pr = yaml.safe_load(Path('.github/workflows/policy-review.yml').read_text())
+        integration = pr['jobs']['integration']
+        self.assertEqual(integration['permissions'], {'contents': 'read'})
+        self.assertTrue(any('docker build --tag local-pr-validation' in s.get('run', '') for s in integration['steps']))
+        self.assertFalse(any('push: true' in str(s) or 'promotion.py publish' in s.get('run', '') for s in integration['steps']))
+
     def test_automatic_publisher_is_gated_and_never_rebuilds(self):
         workflow = yaml.safe_load(Path('.github/workflows/release.yml').read_text())
         publisher = workflow['jobs']['publish']
@@ -51,7 +74,9 @@ class WorkflowPolicyTests(unittest.TestCase):
         for step in publisher['steps']:
             self.assertNotIn('docker/build-push-action', step.get('uses', ''))
             self.assertNotIn('docker build', step.get('run', ''))
-        self.assertEqual(workflow['concurrency'], {'group': 'ghcr-main-release', 'cancel-in-progress': False})
+        self.assertNotIn('concurrency', workflow)
+        self.assertNotIn('concurrency', workflow['jobs']['validate'])
+        self.assertEqual(publisher['concurrency'], {'group': 'ghcr-main-release', 'cancel-in-progress': False})
         self.assertFalse(Path('.github/workflows/promote.yml').exists())
         self.assertFalse(Path('.github/workflows/promotion-proposal.yml').exists())
         self.assertEqual(workflow['jobs']['validate']['permissions']['contents'], 'read')

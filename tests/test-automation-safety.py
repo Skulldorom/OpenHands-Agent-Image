@@ -8,6 +8,10 @@ import sys
 import tempfile
 import hashlib
 import unittest
+from unittest.mock import patch
+import urllib.error
+import io
+import zipfile
 
 sys.path.insert(0, 'scripts')
 import promotion
@@ -23,6 +27,31 @@ class SafetyTests(unittest.TestCase):
         self.assertFalse(release.reusable_candidate(state, 'changed', 'base'))
         self.assertFalse(release.reusable_candidate(state, 'content', 'new-base'))
         self.assertFalse(release.reusable_candidate(dict(state, image_digest='latest'), 'content', 'base'))
+
+    def test_immutable_candidate_tag_preflight_blocks_existing_tag(self):
+        with patch.dict(os.environ, GITHUB_RUN_ID='42', GITHUB_RUN_ATTEMPT='2'):
+            with patch.object(release, 'registry', return_value=('different-content', {})) as registry:
+                with self.assertRaisesRegex(AssertionError, 'already exists'):
+                    release.assert_candidate_tag_absent()
+                self.assertEqual(registry.call_args.args[1], 'candidate-42-2')
+            for code in (404, 403, 500):
+                error = urllib.error.HTTPError('https://ghcr.io', code, 'error', {}, None)
+                with patch.object(release, 'registry', side_effect=error):
+                    if code == 404:
+                        release.assert_candidate_tag_absent()
+                    else:
+                        with self.assertRaises(urllib.error.HTTPError):
+                            release.assert_candidate_tag_absent()
+
+    def test_failed_validation_candidate_journal_can_be_retried(self):
+        state = dict(status='built', fingerprint='content', upstream_digest='base', image_digest='sha256:' + 'a'*64)
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w') as archive:
+            archive.writestr('state.json', json.dumps(state))
+        artifact = dict(id=1, expired=False, name='candidate-state-' + release.candidate_key('content', 'base') + '-42-1')
+        with patch.object(release, 'gh', return_value=json.dumps({'artifacts': [artifact]})), patch.object(release.subprocess, 'check_output', return_value=buffer.getvalue()):
+            self.assertEqual(release.retained_marker('content', 'base'), state['image_digest'])
+            self.assertEqual(release.candidate_action(state, {'image': 'content'}, 'base'), 'validate')
 
     def test_release_increment_is_validated_and_patch_default(self):
         self.assertEqual(release.next_version('1.2.3', 'patch'), '1.2.4')

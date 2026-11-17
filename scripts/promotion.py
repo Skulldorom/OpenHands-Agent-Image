@@ -307,6 +307,7 @@ def publish():
     assert reassessed == load("security-assessment.json"), "Security reassessment differs from sealed decision"
     release.validate_publication_evidence(state, json.loads(Path("security-assessment.json").read_text()),
         json.loads(Path("functional-pass.json").read_text()), json.loads(Path("security/policy.json").read_text()), selection["candidate"])
+    state = release.select_release(state, release.release_records())
     release.write_state(reconcile(state, GitHubRegistry(), assert_fresh))
 
 if __name__ == "__main__":

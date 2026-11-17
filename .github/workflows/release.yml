@@ -7,9 +7,6 @@ on:
         default: auto
 permissions:
   contents: read
-concurrency:
-  group: ghcr-main-release
-  cancel-in-progress: false
 jobs:
   validate:
     if: github.ref == 'refs/heads/main'
@@ -73,7 +70,10 @@ jobs:
         env:
           UPSTREAM: ${{ steps.plan.outputs.upstream }}
         run: docker buildx build --check --build-arg UPSTREAM_IMAGE="ghcr.io/openhands/agent-server@$UPSTREAM" .
-      - name: Build candidate once with SBOM and provenance
+      - name: Refuse existing immutable run tag
+        if: steps.plan.outputs.build == 'true'
+        run: python3 scripts/release.py assert-candidate-tag-absent
+      - name: Build fresh candidate with SBOM and provenance
         id: build
         if: steps.plan.outputs.build == 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -81,9 +81,9 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          tags: |
-            ghcr.io/skulldorom/openhands-agent:candidate-${{ github.run_id }}-${{ github.run_attempt }}
-            ghcr.io/skulldorom/openhands-agent:${{ steps.plan.outputs.candidate_key }}
+          tags: ghcr.io/skulldorom/openhands-agent:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          no-cache: true
+          pull: true
           provenance: mode=max
           sbom: true
           build-args: |
@@ -101,6 +101,14 @@ jobs:
           subject-name: ghcr.io/skulldorom/openhands-agent
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+      - name: Preserve immutable candidate lifecycle journal
+        if: steps.plan.outputs.build == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: candidate-state-${{ steps.plan.outputs.candidate_key }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: state.json
+          retention-days: 90
+          if-no-files-found: error
       - name: Select exact candidate and begin fresh validation
         id: candidate
         if: steps.plan.outputs.validate == 'true'
@@ -250,6 +258,9 @@ jobs:
         run: echo 'Validation failed. No latest promotion occurred. Inspect job logs; existing releases are preserved.' >> "$GITHUB_STEP_SUMMARY"
   publish:
     needs: validate
+    concurrency:
+      group: ghcr-main-release
+      cancel-in-progress: false
     if: needs.validate.result == 'success' && needs.validate.outputs.eligible == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20

@@ -73,6 +73,48 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(backend.tags, {tag: self.state["image_digest"] for tag in ("1.0.0", "v1.0.0", "latest")})
         self.assertLess(backend.events.index("after_assets"), backend.events.index("before_latest"))
 
+    def test_identical_fresh_build_reassesses_original_release_without_reserving(self):
+        backend = Backend()
+        promotion.reconcile(self.state, backend, lambda s: None)
+        original_source = backend.git['1.0.0']
+        fresh = dict(self.state, version='1.0.1', commit='d'*40,
+                     previous_approved=dict(self.state), explicit_bump=False)
+        selected = promotion.release.select_release(fresh)
+        self.assertEqual(selected['version'], '1.0.0')
+        promotion.reconcile(selected, backend, lambda s: None)
+        self.assertEqual(len(backend.releases), 1)
+        self.assertEqual(backend.git['1.0.0'], original_source)
+
+    def test_explicit_bumps_allow_identical_digest_release(self):
+        for version in ('1.0.1', '1.1.0', '2.0.0'):
+            state = dict(self.state, version=version, previous_approved=self.state, explicit_bump=True)
+            self.assertEqual(promotion.release.select_release(state)['version'], version)
+
+    def test_failed_validation_cannot_select_release(self):
+        for status in ('built', 'functional_failed', 'security_failed'):
+            with self.assertRaises(AssertionError):
+                promotion.release.select_release(dict(self.state, status=status))
+
+    def test_publication_rechecks_version_after_overlapping_builds(self):
+        owner = dict(self.state, version='1.0.1')
+        record = {'tag_name': 'v1.0.1', 'draft': False, 'body': '<!-- release-state:' + json.dumps(owner) + ' -->'}
+        built = dict(self.state, version='1.0.1', image_digest='new', bump='patch')
+        selected = promotion.release.select_release(built, [record])
+        self.assertEqual(selected['version'], '1.0.2')
+        record['draft'] = True
+        with self.assertRaisesRegex(AssertionError, 'must be recovered'):
+            promotion.release.select_release(built, [record])
+
+    def test_pending_release_owns_version_and_digest_before_new_publication(self):
+        pending = dict(self.state)
+        fresh = dict(self.state, version='1.1.0', commit='d'*40, explicit_bump=True,
+                     pending_release=pending)
+        selected = promotion.release.select_release(fresh)
+        self.assertEqual(selected['version'], '1.0.0')
+        self.assertEqual(selected['release_source_commit'], pending['commit'])
+        with self.assertRaisesRegex(AssertionError, 'must be recovered'):
+            promotion.release.select_release(dict(fresh, image_digest='different'))
+
     def test_interruption_before_and_after_every_boundary(self):
         for action in ("intent", "1.0.0", "v1.0.0", "git", "assets", "latest", "complete"):
             for side in ("before", "after"):

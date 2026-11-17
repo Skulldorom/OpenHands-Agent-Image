@@ -175,6 +175,7 @@ def run(args):
                 path = Path(name)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(json.dumps({'fixture': identity, 'deployable': False}))
+            Path('layer-classifications.json').write_text(json.dumps({'classifications': [], 'integration_fixture': True}))
             Path('selection.json').write_text(json.dumps({'run_id': 1, 'run_attempt': 1, 'fixture': identity}))
             state = {'version': '0.0.1', 'commit': commit, 'release_source_commit': commit,
                      'image_digest': ledger['digest'], 'upstream_digest': ledger['digest'],
@@ -210,6 +211,7 @@ def run(args):
             require(not current['draft'] and current['body'] == journal['body'] and unchanged == assets,
                     'Retry replaced original journal/assets')
             require(backend.tag_digest(alias) == ledger['digest'], 'Isolated alias missing')
+            Path('layer-classifications.json').write_text(json.dumps({'classifications': [], 'integration_fixture': True}))
             Path('selection.json').write_text(json.dumps({'run_id': 2, 'run_attempt': 1, 'fixture': identity}))
             promotion.reconcile(dict(state, fingerprints={'image': identity, 'security': 'reassessment'}),
                                 backend, freshness)

@@ -23,3 +23,4 @@ retained-candidate.json
 upstream-baseline.json
 previous-upstream-trivy.json
 security-summary.txt
+/layer-classifications.json

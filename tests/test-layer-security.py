@@ -8,6 +8,9 @@ import unittest
 import struct
 import json
 from contextlib import redirect_stdout
+from datetime import timedelta
+from unittest.mock import patch
+import hashlib
 
 spec = importlib.util.spec_from_file_location('layers', 'tests/test-image-layers.py')
 layers = importlib.util.module_from_spec(spec)
@@ -128,6 +131,22 @@ class LayerTests(unittest.TestCase):
         value = b'ghs_1234567_' + b'eyJ'*40 + b'.' + b'A_'*80 + b'.' + b'B-'*40
         with redirect_stdout(io.StringIO()):
             self.assertEqual(layers.scan_file(io.BytesIO(value), chunk_size=17), 'github_installation')
+
+    def test_nonlive_installation_classification_is_exact_and_time_bound(self):
+        now = layers.INSTALLATION_LITERAL_OBSERVED_BEFORE + timedelta(hours=2)
+        digest = layers.NONLIVE_INSTALLATION_LITERAL_SHA256
+        self.assertIsNotNone(layers.credential_classification('github_token', b'ghs_', digest, now))
+        for rule, prefix, sha, stamp in [('github_token', b'ghp_', digest, now), ('github_installation', b'ghs_', digest, now),
+                ('github_token', b'ghs_', 'a'*64, now), ('github_token', b'ghs_', digest, now-timedelta(hours=2))]:
+            self.assertIsNone(layers.credential_classification(rule, prefix, sha, stamp))
+
+    def test_classified_literal_never_exempts_other_tokens_in_same_file(self):
+        fixture = b'ghs_' + b'Q2'*20
+        digest = hashlib.sha256(fixture).hexdigest()
+        records = []
+        with patch.object(layers, 'NONLIVE_INSTALLATION_LITERAL_SHA256', digest), redirect_stdout(io.StringIO()):
+            self.assertEqual(layers.scan_file(io.BytesIO(fixture + b'\x00ghp_' + b'Z'*36), classified=records), 'github_token')
+        self.assertEqual(len(records), 1)
 
     def test_all_matches_checked_after_harmless_literal(self):
         raw = b'\x00-----BEGIN PRIVATE KEY-----\x00' + b'ghp_' + b'Z' * 36

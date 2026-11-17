@@ -75,6 +75,22 @@ class SafetyTests(unittest.TestCase):
             os.environ.clear()
             os.environ.update(old)
 
+    def test_layer_classification_report_cannot_authorize_unknown_detections(self):
+        root = Path.cwd()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                os.chdir(directory)
+                report = {'candidate': release.IMAGE+'@candidate', 'layers': 1, 'unclassified_detections': 0, 'classifications': []}
+                for field, value in [('candidate', 'different'), ('layers', 0), ('unclassified_detections', 1),
+                        ('classifications', [{'rule': 'github_token', 'prefix': 'ghs_', 'sha256': 'a'*64}])]:
+                    Path('layer-classifications.json').write_text(json.dumps(dict(report, **{field: value})))
+                    with self.assertRaises(AssertionError):
+                        promotion.validate_layer_report('candidate', datetime.now(timezone.utc))
+                Path('layer-classifications.json').write_text(json.dumps(report))
+                promotion.validate_layer_report('candidate', datetime.now(timezone.utc))
+        finally:
+            os.chdir(root)
+
     def test_complete_manifest_passes_and_tampering_fails(self):
         old = dict(os.environ)
         root = Path.cwd()
@@ -100,6 +116,7 @@ class SafetyTests(unittest.TestCase):
                     archive.addfile(member, io.BytesIO(database))
                 Path('upstream-baseline.json').write_text(json.dumps({'upstream': None, 'version': None, 'approval_sha256': None}))
                 Path('previous-upstream-trivy.json').write_text('null')
+                Path('layer-classifications.json').write_text(json.dumps({'candidate': release.IMAGE+'@candidate', 'layers': 1, 'unclassified_detections': 0, 'classifications': []}))
                 os.environ.update(CANDIDATE_DIGEST='candidate', GITHUB_SHA='source', GITHUB_RUN_ID='123', GITHUB_RUN_ATTEMPT='1')
                 selection = {'candidate': 'candidate', 'policy_sha256': policy_hash, 'policy_commit': 'source',
                              'run_id': 123, 'run_attempt': 1, 'prepared_at': stamp, 'scanned_at': datetime.now(timezone.utc).isoformat(),

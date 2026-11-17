@@ -3,6 +3,8 @@
 import re
 import hashlib
 import struct
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
 import json
 import subprocess
 import sys
@@ -20,10 +22,34 @@ AWS_SUBSTRING = re.compile(rb"AKIA[0-9A-Z]{16}")
 PEM_PAYLOAD = re.compile(rb"[ \t\r\n]+(?:(?:[A-Za-z0-9+/=][ \t\r\n]*){16}|Proc-Type:[ \t]*4,ENCRYPTED)")
 
 
-def credential_matches(raw):
+# Exact finding observed in the immutable upstream layer before 13:54:24 UTC.
+# See security/CREDENTIAL-LAYER-INVESTIGATION.md and the authenticated run logs.
+# This does not authorize any other token or exempt a directory/binary/layer.
+NONLIVE_INSTALLATION_LITERAL_SHA256 = "11116762eb8f44dcdcabd6cc844d36d367f2be80c0788bd61104ef968d874c57"
+INSTALLATION_LITERAL_OBSERVED_BEFORE = datetime(2026, 11, 17, 13, 54, 24, tzinfo=timezone.utc)
+
+
+def credential_classification(rule, prefix, digest, now):
+    if (rule != "github_token" or prefix != b"ghs_" or digest != NONLIVE_INSTALLATION_LITERAL_SHA256
+            or now < INSTALLATION_LITERAL_OBSERVED_BEFORE + timedelta(hours=1)):
+        return None
+    return {"rule": rule, "prefix": "ghs_", "sha256": digest,
+            "classification": "non-live-installation-token-shaped-literal",
+            "observed_before": INSTALLATION_LITERAL_OBSERVED_BEFORE.isoformat(),
+            "maximum_lifetime_seconds": 3600,
+            "evidence": "https://github.com/Skulldorom/OpenHands-Agent-Image/actions/runs/44097217505"}
+
+
+def credential_matches(raw, classified=None):
     normalized = raw.replace(b"\\r", b"\r").replace(b"\\n", b"\n")
     for match in CREDENTIAL.finditer(normalized):
         if match.lastgroup != "private_key" or PEM_PAYLOAD.match(normalized, match.end()):
+            record = credential_classification(match.lastgroup, match.group()[:4], hashlib.sha256(match.group()).hexdigest(), datetime.now(timezone.utc))
+            if record:
+                print(json.dumps(record))
+                if classified is not None and record not in classified:
+                    classified.append(record)
+                continue
             yield match
 
 
@@ -53,7 +79,7 @@ def elf_match_scope(source, header, offset):
     return None
 
 
-def scan_file(source, credential_file=False, chunk_size=1024 * 1024):
+def scan_file(source, credential_file=False, chunk_size=1024 * 1024, classified=None):
     """Inspect all bytes with bounded memory, retaining cross-chunk key prefixes."""
     tail = b""
     header = None
@@ -66,7 +92,7 @@ def scan_file(source, credential_file=False, chunk_size=1024 * 1024):
         if credential_file and chunk.strip():
             return "credential_file"
         raw = tail + chunk
-        match = next(credential_matches(raw), None)
+        match = next(credential_matches(raw, classified), None)
         if match:
             # Classification metadata only. Never print matched content/context.
             raw_start = raw.find(match.group())
@@ -106,7 +132,7 @@ def scan_file(source, credential_file=False, chunk_size=1024 * 1024):
                 tail = candidate.group() + compact
 
 
-def check_layers(stream):
+def check_layers(stream, classified=None):
     count = 0
     with tarfile.open(fileobj=stream, mode="r|") as archive:
         for member in archive:
@@ -129,7 +155,7 @@ def check_layers(stream):
                     if entry.isfile():
                         protected = ("/.git-credentials", "/.ssh/id_rsa", "/.ssh/id_ed25519", "/.aws/credentials", "/.docker/config.json", "/.env")
                         credential_file = any(name == suffix.lstrip("/") or name.endswith(suffix) for suffix in protected)
-                        rule = scan_file(layer.extractfile(entry), credential_file)
+                        rule = scan_file(layer.extractfile(entry), credential_file, classified=classified)
                         if rule:
                             # Rule and location only; never matched bytes or context.
                             raise AssertionError(f"Credential pattern recoverable in layer {count}: {name}; rule={rule}; archive_member={member.name}")
@@ -140,8 +166,12 @@ def check_layers(stream):
 if __name__ == "__main__":
     process = subprocess.Popen(["docker", "image", "save", sys.argv[1]], stdout=subprocess.PIPE)
     try:
-        count = check_layers(process.stdout)
+        classified = []
+        count = check_layers(process.stdout, classified)
         assert process.wait(timeout=30) == 0, "docker save failed"
+        Path("layer-classifications.json").write_text(json.dumps({"candidate": sys.argv[1], "layers": count,
+            "unclassified_detections": 0, "classifications": classified}, indent=2) + "\n")
+        print(f"Classified non-live fingerprints: {len(classified)}; unclassified credential detections: 0")
         print(f"Credential file patterns and snakeoil material absent from all {count} image layers: PASS")
     finally:
         process.stdout.close()

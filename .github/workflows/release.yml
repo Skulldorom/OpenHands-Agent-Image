@@ -251,6 +251,7 @@ jobs:
           include-hidden-files: true
           path: |
             functional-pass.json
+            layer-classifications.json
             state.json
             security/policy.json
             selection.json

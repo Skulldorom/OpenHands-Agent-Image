@@ -140,7 +140,7 @@ class ImmutableAssetsTests(unittest.TestCase):
                 promotion.verify_baseline_owner({'upstream': None, 'version': None, 'approval_sha256': None}, [record])
 
     def test_prior_evidence_schema_recovery_keeps_original_bytes(self):
-        names = promotion.SEALED_FILES - {'upstream-baseline.json', 'previous-upstream-trivy.json'}
+        names = promotion.SEALED_FILES - {'upstream-baseline.json', 'previous-upstream-trivy.json', 'layer-classifications.json'}
         files = {n: Path(n).read_bytes() for n in names}
         files['selection.json'] = json.dumps({'files': {n: hashlib.sha256(files[n]).hexdigest() for n in names}}).encode()
         original = promotion.evidence_archive(files)
@@ -148,6 +148,21 @@ class ImmutableAssetsTests(unittest.TestCase):
         artifacts = {'artifacts': [{'id': 4, 'name': 'validation-1-1', 'expired': False}]}
         with patch.object(promotion.release, 'gh', return_value=json.dumps(artifacts)), patch.object(promotion.subprocess, 'check_output', return_value=original):
             self.assertEqual(self.backend.recover_original(descriptor), original)
+
+    def test_release_notes_report_custom_and_inherited_risk_separately(self):
+        assessment = {'comparison_counts': {'inherited unchanged': 530}, 'new_upstream_findings': None,
+                      'modification_pass': True, 'severity_counts': {'HIGH': 529, 'CRITICAL': 1},
+                      'upstream_severity_counts': {'HIGH': 529, 'CRITICAL': 1}, 'removed_findings': [],
+                      'materially_worsened': [], 'introduced_high_critical': [], 'emergency_blocked': [], 'secrets': []}
+        Path('security-assessment.json').write_text(json.dumps(assessment))
+        Path('layer-classifications.json').write_text(json.dumps({'classifications': [{'sha256': 'known-nonlive'}]}))
+        state = {'version': '1.0.0', 'image_digest': 'candidate', 'upstream_digest': 'base', 'agent_server_version': '1.62.0'}
+        notes = promotion.release_notes(state)
+        self.assertIn('Custom image security: PASS', notes)
+        self.assertIn('Inherited upstream security: reported, not automatically blocked', notes)
+        self.assertIn('Introduced HIGH/CRITICAL: 0', notes)
+        self.assertIn('Classified non-live credential fingerprints: 1', notes)
+        self.assertNotIn('Accepted findings', notes)
 
     def test_archive_retains_exact_policy_scans_and_state(self):
         with zipfile.ZipFile(io.BytesIO(self.raw)) as archive:

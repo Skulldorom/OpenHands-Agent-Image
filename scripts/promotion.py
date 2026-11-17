@@ -18,7 +18,7 @@ import urllib.error
 import evidence
 import release
 
-SEALED_FILES = evidence.FILES | {"security-assessment.json", "security-assessment.md", "scanner-database.tar.gz", "security/policy.json", "upstream-baseline.json", "previous-upstream-trivy.json"}
+SEALED_FILES = evidence.FILES | {"security-assessment.json", "security-assessment.md", "scanner-database.tar.gz", "security/policy.json", "upstream-baseline.json", "previous-upstream-trivy.json", "layer-classifications.json"}
 
 def policy_hash():
     return hashlib.sha256(Path("security/policy.json").read_bytes()).hexdigest()
@@ -54,6 +54,21 @@ def validate_fresh_scans(selection, now):
         with archive.extractfile(matches[0]) as database:
             assert hashlib.file_digest(database, "sha256").hexdigest() == expected.split()[0], "Frozen scanner database changed"
 
+def validate_layer_report(digest, now):
+    report = json.loads(Path("layer-classifications.json").read_text())
+    assert set(report) == {"candidate", "layers", "unclassified_detections", "classifications"}
+    assert report["candidate"] == release.IMAGE + "@" + digest, "Layer report candidate mismatch"
+    assert type(report["layers"]) is int and report["layers"] > 0
+    assert type(report["unclassified_detections"]) is int and report["unclassified_detections"] == 0
+    assert isinstance(report["classifications"], list)
+    source = Path(__file__).resolve().parents[1] / "tests/test-image-layers.py"
+    spec = importlib.util.spec_from_file_location("credential_layers", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for record in report["classifications"]:
+        assert module.credential_classification(record["rule"], record["prefix"].encode(), record["sha256"], now) == record, "Unknown credential classification"
+
+
 def prepare(digest):
     state = json.loads(Path("state.json").read_text())
     assert state["status"] == "validated"
@@ -61,6 +76,7 @@ def prepare(digest):
                  "run_id": int(os.environ["GITHUB_RUN_ID"]), "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
                  "prepared_at": state["validation_started_at"], "scanned_at": datetime.now(timezone.utc).isoformat()}
     validate_fresh_scans(selection, datetime.now(timezone.utc))
+    validate_layer_report(digest, datetime.now(timezone.utc))
     selection["files"] = {n: hashlib.sha256(Path(n).read_bytes()).hexdigest() for n in SEALED_FILES}
     Path("selection.json").write_text(json.dumps(selection, sort_keys=True, indent=2) + "\n")
 
@@ -74,6 +90,7 @@ def recheck(selection, now):
     for name, digest in selection["files"].items():
         assert hashlib.sha256(Path(name).read_bytes()).hexdigest() == digest, "Evidence changed after assessment"
     validate_fresh_scans(selection, now)
+    validate_layer_report(selection["candidate"], now)
 
 def verify_bundle_digest(raw, recorded, workflow_output):
     actual = "sha256:" + hashlib.sha256(raw).hexdigest()
@@ -243,6 +260,7 @@ def release_notes(state, image=None):
     assessment = json.loads(Path("security-assessment.json").read_text())
     counts = assessment["comparison_counts"]
     new_upstream = assessment["new_upstream_findings"]
+    classifications = json.loads(Path("layer-classifications.json").read_text())["classifications"]
     summary = (f"Custom image security: {'PASS' if assessment['modification_pass'] else 'FAIL'}. "
                "Inherited upstream security: reported, not automatically blocked.\n"
                f"Candidate severity totals: {assessment['severity_counts']}; upstream: {assessment['upstream_severity_counts']}.\n"
@@ -250,7 +268,8 @@ def release_notes(state, image=None):
                f"removed: {len(assessment['removed_findings'])}; worsened: {len(assessment['materially_worsened'])}.\n"
                f"Introduced HIGH/CRITICAL: {len(assessment['introduced_high_critical'])}; "
                f"new upstream findings: {len(new_upstream) if new_upstream is not None else 'first approved baseline not established'}; "
-               f"emergency-blocked: {len(assessment['emergency_blocked'])}; secret detections: {len(assessment['secrets'])}.")
+               f"emergency-blocked: {len(assessment['emergency_blocked'])}; secret detections: {len(assessment['secrets'])}. "
+               f"Classified non-live credential fingerprints: {len(classifications)} (details attached); unclassified layer detections: 0.")
     return (f"Validated custom image: `{image or release.IMAGE}@{state['image_digest']}`\n"
             f"Official upstream: `ghcr.io/openhands/agent-server@{state['upstream_digest']}`\n"
             f"Agent Server: {state['agent_server_version']}. Previous immutable releases remain available for rollback.\n\n"

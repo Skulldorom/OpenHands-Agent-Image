@@ -28,6 +28,30 @@ def archive(files):
 
 
 class LayerTests(unittest.TestCase):
+    def test_saved_layer_hash_is_verified_before_using_age_evidence(self):
+        payload = archive({'app/file': b'normal'})
+        with self.assertRaisesRegex(AssertionError, 'Saved layer digest mismatch'):
+            layers.check_layers(io.BytesIO(archive({'blobs/sha256/'+'a'*64: payload})))
+        digest = hashlib.sha256(payload).hexdigest()
+        inspected = []
+        self.assertEqual(layers.check_layers(io.BytesIO(archive({'blobs/sha256/'+digest: payload})), inspected=inspected), 1)
+        self.assertEqual(inspected, ['sha256:'+digest])
+
+    def test_image_scan_retains_every_historical_detection_and_docker_failures(self):
+        payload = archive({'tmp/token': b'ghp_'+b'A'*36})
+        saved = archive({'blobs/sha256/'+hashlib.sha256(payload).hexdigest(): payload})
+        from types import SimpleNamespace
+        for code in (0, 9):
+            process = SimpleNamespace(stdout=io.BytesIO(saved), wait=lambda timeout: code, poll=lambda: code)
+            with patch.object(layers.subprocess, 'Popen', return_value=process), redirect_stdout(io.StringIO()):
+                if code:
+                    with self.assertRaisesRegex(AssertionError, 'docker save failed'):
+                        layers.scan_image('immutable-fixture')
+                else:
+                    report = layers.scan_image('immutable-fixture')
+                    self.assertEqual(report['unclassified_detections'], 1)
+                    self.assertEqual(report['unclassified_findings'][0]['patterns'][0]['credential_rule'], 'github_token')
+
     def test_normal_files(self):
         self.assertEqual(layers.check_layers(io.BytesIO(archive({'old/layer.tar': archive({'app/source.py': b'print(1)'})}))), 1)
 
@@ -132,22 +156,65 @@ class LayerTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             self.assertEqual(layers.scan_file(io.BytesIO(value), chunk_size=17), 'github_installation')
 
-    def test_nonlive_installation_classification_is_exact_and_time_bound(self):
-        now = layers.INSTALLATION_LITERAL_OBSERVED_BEFORE + timedelta(hours=2)
-        digest = layers.NONLIVE_INSTALLATION_LITERAL_SHA256
-        self.assertIsNotNone(layers.credential_classification('github_token', b'ghs_', digest, now))
-        self.assertIsNotNone(layers.credential_classification('github_token', b'ghs_', layers.NONLIVE_INSTALLATION_LITERAL_SHA256_SECOND, now))
-        for rule, prefix, sha, stamp in [('github_token', b'ghp_', digest, now), ('github_installation', b'ghs_', digest, now),
-                ('github_token', b'ghs_', 'a'*64, now), ('github_token', b'ghs_', digest, now-timedelta(hours=2))]:
-            self.assertIsNone(layers.credential_classification(rule, prefix, sha, stamp))
+    def test_expiry_requires_legacy_type_exact_observed_layer_and_time(self):
+        from datetime import datetime, timezone
+        policy = json.loads(layers.POLICY_PATH.read_text())
+        observation = policy['layer_observations'][0]
+        now = datetime.fromisoformat(observation['observed_before']) + timedelta(hours=2)
+        row = dict(credential_rule='github_token', token_family='ghs_', match_length=40,
+                   standalone=True, diff_id=observation['diff_id'])
+        self.assertIsNotNone(layers.credential_classification(row, now))
+        for field, value in [('credential_rule', 'github_installation'), ('token_family', 'ghp_'),
+                             ('match_length', 51), ('standalone', False), ('diff_id', 'sha256:'+'a'*64)]:
+            self.assertIsNone(layers.credential_classification(dict(row, **{field: value}), now))
+        self.assertIsNone(layers.credential_classification(row, now-timedelta(hours=2)))
 
     def test_classified_literal_never_exempts_other_tokens_in_same_file(self):
-        fixture = b'ghs_' + b'Q2'*20
-        digest = hashlib.sha256(fixture).hexdigest()
+        fixture = b'ghs_' + b'Q2'*18
+        observation = json.loads(layers.POLICY_PATH.read_text())['layer_observations'][0]
         records = []
-        with patch.object(layers, 'NONLIVE_INSTALLATION_LITERAL_SHA256', digest), redirect_stdout(io.StringIO()):
-            self.assertEqual(layers.scan_file(io.BytesIO(fixture + b'\x00ghp_' + b'Z'*36), classified=records), 'github_token')
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(layers.scan_file(io.BytesIO(fixture + b'\x00ghp_' + b'Z'*36),
+                diff_id=observation['diff_id'], classified=records), 'github_token')
         self.assertEqual(len(records), 1)
+
+    def test_public_private_key_uses_complete_material_and_continues_scanning(self):
+        value = subprocess.check_output(['openssl', 'genpkey', '-algorithm', 'EC',
+                                         '-pkeyopt', 'ec_paramgen_curve:prime256v1'], stderr=subprocess.DEVNULL)
+        match = layers.CREDENTIAL.search(value)
+        material, _ = layers.pem_material(value, match)
+        policy = {'public_private_keys': [dict(material, source='https://example.invalid/public-fixture',
+                   purpose='Synthetic public-fixture classification test')], 'layer_observations': []}
+        for suffix, expected in [(b'', None), (b'\x00ghp_'+b'A'*36, 'github_token'),
+                                 (b'\n-----BEGIN PRIVATE KEY-----\n'+b'B'*64, 'private_key')]:
+            records = []
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(layers.scan_file(io.BytesIO(value+suffix), policy=policy, classified=records), expected)
+            self.assertEqual(len(records), 1)
+        altered = value.replace(value.splitlines()[1], b'A'*len(value.splitlines()[1]))
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(layers.scan_file(io.BytesIO(altered), policy=policy), 'private_key')
+
+    def test_full_payload_fingerprints_distinguish_multiple_keys(self):
+        raw = b'-----BEGIN PRIVATE KEY-----\n'+b'A'*64+b'\n-----END PRIVATE KEY-----\n'
+        raw += raw.replace(b'A'*64, b'B'*64)
+        detected = []
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(layers.scan_file(io.BytesIO(raw), detected=detected), 'private_key')
+        self.assertEqual(len(detected), 2)
+        self.assertNotEqual(detected[0]['payload_sha256'], detected[1]['payload_sha256'])
+
+    def test_exact_comparison_distinguishes_path_layer_and_material(self):
+        row = dict(file='app/file', archive_member='blobs/sha256/aaa', credential_rule='github_token', match_sha256='b'*64)
+        def report(rows):
+            return dict(classifications=[], unclassified_findings=[dict(file=r['file'], archive_member=r['archive_member'],
+                        rule=r['credential_rule'], patterns=[r]) for r in rows])
+        before = report([row])
+        after = report([row, dict(row, archive_member='blobs/sha256/new'), dict(row, match_sha256='c'*64)])
+        comparison = layers.compare_findings(before, after)
+        self.assertEqual(len(comparison['inherited_unclassified']), 1)
+        self.assertEqual(len(comparison['introduced']), 2)
+        self.assertEqual(layers.compare_findings(after, before)['removed'], comparison['introduced'])
 
     def test_complete_inventory_still_fails_and_reports_all_affected_files(self):
         files = {'opt/first': b'ghp_' + b'A2'*18, 'usr/lib/second': b'github_pat_' + b'B_'*30}

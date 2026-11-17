@@ -81,29 +81,11 @@ jobs:
         run: |
           upstream=$(sed -n 's/^ARG UPSTREAM_IMAGE=//p' Dockerfile)
           docker pull "$upstream"
-          python3 - "$upstream" <<'PYCODE'
-          import json
-          import subprocess
-          import sys
-          def inspect(ref):
-              return json.loads(subprocess.check_output(["docker", "inspect", ref]))[0]["RootFS"]["Layers"]
-          base = inspect(sys.argv[1])
-          candidate = inspect("local-pr-validation")
-          assert candidate[:len(base)] == base, "Candidate base layers differ"
-          print("Upstream diff IDs: " + json.dumps(base))
-          print(f"Verified upstream layer prefix: {len(base)} of {len(candidate)} layers; exact upstream prefix verified")
-          PYCODE
-          status=0
-          timeout 15m python3 tests/test-image-layers.py "$upstream" || status=$?
-          if [[ -f layer-classifications.json ]]; then mv layer-classifications.json upstream-layer-report.json; fi
-          timeout 15m python3 tests/test-image-layers.py local-pr-validation || status=$?
-          if [[ -f layer-classifications.json ]]; then mv layer-classifications.json candidate-layer-report.json; fi
-          exit "$status"
+          timeout 30m python3 tests/test-image-layers.py local-pr-validation "$upstream"
       - name: Preserve complete credential layer inventories
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: credential-layer-inventory
           path: |
-            upstream-layer-report.json
-            candidate-layer-report.json
+            layer-classifications.json

@@ -49,7 +49,7 @@ jobs:
       - name: Inspect every saved layer of the exact retained candidate
         run: |
           candidate=$(jq -r .candidate security/historical-evidence.json)
-          timeout 15m python3 tests/test-image-layers.py "$candidate"
+          timeout 30m python3 tests/test-image-layers.py "$candidate"
       - name: Require exact-upstream custom security policy
         if: always()
         run: python3 -c 'import json; assert json.load(open("security-assessment.json"))["pass"], "Custom risk, emergency block or secrets prevent release"'

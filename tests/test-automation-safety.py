@@ -20,6 +20,24 @@ import evidence
 import release
 
 
+def layer_report():
+    source = Path(promotion.__file__).resolve().parents[1] / 'tests/test-image-layers.py'
+    spec = __import__('importlib.util', fromlist=['']).spec_from_file_location('layer_fixture', source)
+    module = __import__('importlib.util', fromlist=['']).module_from_spec(spec)
+    spec.loader.exec_module(module)
+    scan_path = Path('upstream-trivy.json')
+    scan = json.loads(scan_path.read_text()) if scan_path.exists() else {}
+    scan['ArtifactName'] = 'ghcr.io/openhands/agent-server@sha256:'+'a'*64
+    scan_path.write_text(json.dumps(scan))
+    empty = dict(candidate='ghcr.io/openhands/agent-server@sha256:'+'a'*64, layers=1,
+                 unclassified_detections=0, classifications=[], unclassified_findings=[], layer_diff_ids=['sha256:'+'a'*64])
+    report = dict(empty, candidate=release.IMAGE+'@candidate', schema=2, upstream=empty, image_id='sha256:'+'b'*64,
+                  scanned_at=datetime.now(timezone.utc).isoformat(),
+                  policy_sha256=hashlib.sha256(module.POLICY_PATH.read_bytes()).hexdigest())
+    report['comparison'] = module.compare_findings(empty, report)
+    return report
+
+
 class SafetyTests(unittest.TestCase):
 
     def test_candidate_reuse_includes_auth_only_and_functional_failures(self):
@@ -80,14 +98,62 @@ class SafetyTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as directory:
                 os.chdir(directory)
-                report = {'candidate': release.IMAGE+'@candidate', 'layers': 1, 'unclassified_detections': 0, 'classifications': []}
+                report = layer_report()
                 for field, value in [('candidate', 'different'), ('layers', 0), ('unclassified_detections', 1),
-                        ('classifications', [{'rule': 'github_token', 'prefix': 'ghs_', 'sha256': 'a'*64}])]:
+                        ('comparison', {}), ('policy_sha256', 'altered'), ('schema', 1),
+                        ('scanned_at', (datetime.now(timezone.utc)-timedelta(days=2)).isoformat())]:
                     Path('layer-classifications.json').write_text(json.dumps(dict(report, **{field: value})))
                     with self.assertRaises(AssertionError):
                         promotion.validate_layer_report('candidate', datetime.now(timezone.utc))
                 Path('layer-classifications.json').write_text(json.dumps(report))
                 promotion.validate_layer_report('candidate', datetime.now(timezone.utc))
+        finally:
+            os.chdir(root)
+
+    def test_publisher_accepts_public_material_and_rejects_unknown_or_altered_evidence(self):
+        root = Path.cwd()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                os.chdir(directory)
+                report = layer_report()
+                policy = json.loads((root/'security/credential-policy.json').read_text())
+                fixture = policy['public_private_keys'][0]
+                row = dict(credential_rule='private_key', match_sha256='b'*64, match_length=200,
+                           diff_id='sha256:'+'a'*64, file_offset=0, token_family=None, standalone=True,
+                           file='usr/lib/library', archive_member='blobs/sha256/'+'a'*64,
+                           **{k: fixture[k] for k in ('kind', 'payload_sha256', 'payload_length')})
+                row['decision'] = dict(classification='public-cryptographic-test-material', **fixture)
+                report['classifications'] = [row]
+                report['upstream']['classifications'] = [row]
+                spec = __import__('importlib.util', fromlist=['']).spec_from_file_location('layers_gate', root/'tests/test-image-layers.py')
+                module = __import__('importlib.util', fromlist=['']).module_from_spec(spec)
+                spec.loader.exec_module(module)
+                report['comparison'] = module.compare_findings(report['upstream'], report)
+                Path('layer-classifications.json').write_text(json.dumps(report))
+                promotion.validate_layer_report('candidate', datetime.now(timezone.utc))
+                for inherited in (True, False):
+                    blocked = json.loads(json.dumps(report))
+                    unknown = dict(row, credential_rule='github_token', match_sha256='c'*64, token_family='ghp_')
+                    unknown.pop('decision')
+                    finding = dict(file=unknown['file'], archive_member=unknown['archive_member'], rule='github_token', patterns=[unknown])
+                    blocked['unclassified_findings'] = [finding]
+                    blocked['unclassified_detections'] = 1
+                    if inherited:
+                        blocked['upstream']['unclassified_findings'] = [finding]
+                        blocked['upstream']['unclassified_detections'] = 1
+                    blocked['comparison'] = module.compare_findings(blocked['upstream'], blocked)
+                    Path('layer-classifications.json').write_text(json.dumps(blocked))
+                    with self.assertRaises(AssertionError):
+                        promotion.validate_layer_report('candidate', datetime.now(timezone.utc))
+                altered = json.loads(json.dumps(report))
+                altered['classifications'][0]['decision']['purpose'] = 'changed'
+                altered['comparison'] = module.compare_findings(altered['upstream'], altered)
+                Path('layer-classifications.json').write_text(json.dumps(altered))
+                with self.assertRaises(AssertionError):
+                    promotion.validate_layer_report('candidate', datetime.now(timezone.utc))
+                Path('layer-classifications.json').unlink()
+                with self.assertRaises(FileNotFoundError):
+                    promotion.validate_layer_report('candidate', datetime.now(timezone.utc))
         finally:
             os.chdir(root)
 
@@ -116,7 +182,7 @@ class SafetyTests(unittest.TestCase):
                     archive.addfile(member, io.BytesIO(database))
                 Path('upstream-baseline.json').write_text(json.dumps({'upstream': None, 'version': None, 'approval_sha256': None}))
                 Path('previous-upstream-trivy.json').write_text('null')
-                Path('layer-classifications.json').write_text(json.dumps({'candidate': release.IMAGE+'@candidate', 'layers': 1, 'unclassified_detections': 0, 'classifications': []}))
+                Path('layer-classifications.json').write_text(json.dumps(layer_report()))
                 os.environ.update(CANDIDATE_DIGEST='candidate', GITHUB_SHA='source', GITHUB_RUN_ID='123', GITHUB_RUN_ATTEMPT='1')
                 selection = {'candidate': 'candidate', 'policy_sha256': policy_hash, 'policy_commit': 'source',
                              'run_id': 123, 'run_attempt': 1, 'prepared_at': stamp, 'scanned_at': datetime.now(timezone.utc).isoformat(),

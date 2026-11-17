@@ -18,7 +18,7 @@ import urllib.error
 import evidence
 import release
 
-SEALED_FILES = evidence.FILES | {"security-assessment.json", "security-assessment.md", "scanner-database.tar.gz", "security/policy.json", "upstream-baseline.json", "previous-upstream-trivy.json", "layer-classifications.json"}
+SEALED_FILES = evidence.FILES | {"security-assessment.json", "security-assessment.md", "scanner-database.tar.gz", "security/policy.json", "upstream-baseline.json", "previous-upstream-trivy.json", "layer-classifications.json", "security/credential-policy.json"}
 
 def policy_hash():
     return hashlib.sha256(Path("security/policy.json").read_bytes()).hexdigest()
@@ -54,19 +54,40 @@ def validate_fresh_scans(selection, now):
         with archive.extractfile(matches[0]) as database:
             assert hashlib.file_digest(database, "sha256").hexdigest() == expected.split()[0], "Frozen scanner database changed"
 
-def validate_layer_report(digest, now):
+def validate_layer_report(digest, now, prepared_at=None):
     report = json.loads(Path("layer-classifications.json").read_text())
-    assert set(report) == {"candidate", "layers", "unclassified_detections", "classifications"}
+    assert set(report) == {"candidate", "layers", "unclassified_detections", "classifications",
+                           "unclassified_findings", "schema", "upstream", "comparison", "scanned_at", "policy_sha256", "layer_diff_ids", "image_id"}
+    assert report["schema"] == 2
+    assert re.fullmatch(r"sha256:[a-f0-9]{64}", report["image_id"])
     assert report["candidate"] == release.IMAGE + "@" + digest, "Layer report candidate mismatch"
     assert type(report["layers"]) is int and report["layers"] > 0
     assert type(report["unclassified_detections"]) is int and report["unclassified_detections"] == 0
-    assert isinstance(report["classifications"], list)
+    assert report["unclassified_findings"] == []
+    assert timedelta(0) <= now - datetime.fromisoformat(report["scanned_at"]) <= timedelta(hours=24), "Layer evidence expired"
+    if prepared_at is not None:
+        assert datetime.fromisoformat(prepared_at) <= datetime.fromisoformat(report["scanned_at"]), "Layer scan predates validation"
     source = Path(__file__).resolve().parents[1] / "tests/test-image-layers.py"
     spec = importlib.util.spec_from_file_location("credential_layers", source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    for record in report["classifications"]:
-        assert module.credential_classification(record["rule"], record["prefix"].encode(), record["sha256"], now) == record, "Unknown credential classification"
+    assert report["policy_sha256"] == hashlib.sha256(module.POLICY_PATH.read_bytes()).hexdigest(), "Credential policy changed"
+    upstream = report["upstream"]
+    expected_base = json.loads(Path("upstream-trivy.json").read_text())["ArtifactName"]
+    assert upstream["candidate"] == expected_base, "Layer baseline mismatch"
+    assert type(upstream["layers"]) is int and 0 < upstream["layers"] <= report["layers"]
+    for scan in (upstream, report):
+        assert len(scan["layer_diff_ids"]) == scan["layers"]
+        assert all(re.fullmatch(r"sha256:[a-f0-9]{64}", d) for d in scan["layer_diff_ids"])
+    assert set(upstream["layer_diff_ids"]) <= set(report["layer_diff_ids"])
+    assert report["comparison"] == module.compare_findings(upstream, report), "Credential comparison altered"
+    assert not report["comparison"]["inherited_unclassified"]
+    assert not report["comparison"]["inherited_confirmed_credentials"]
+    assert not any(r["status"] != "non-sensitive" for r in report["comparison"]["introduced"])
+    for scan in (upstream, report):
+        assert isinstance(scan["classifications"], list)
+        for record in scan["classifications"]:
+            assert module.credential_classification(record, now) == record["decision"], "Unknown credential classification"
 
 
 def prepare(digest):
@@ -76,7 +97,7 @@ def prepare(digest):
                  "run_id": int(os.environ["GITHUB_RUN_ID"]), "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
                  "prepared_at": state["validation_started_at"], "scanned_at": datetime.now(timezone.utc).isoformat()}
     validate_fresh_scans(selection, datetime.now(timezone.utc))
-    validate_layer_report(digest, datetime.now(timezone.utc))
+    validate_layer_report(digest, datetime.now(timezone.utc), selection["prepared_at"])
     selection["files"] = {n: hashlib.sha256(Path(n).read_bytes()).hexdigest() for n in SEALED_FILES}
     Path("selection.json").write_text(json.dumps(selection, sort_keys=True, indent=2) + "\n")
 
@@ -90,7 +111,7 @@ def recheck(selection, now):
     for name, digest in selection["files"].items():
         assert hashlib.sha256(Path(name).read_bytes()).hexdigest() == digest, "Evidence changed after assessment"
     validate_fresh_scans(selection, now)
-    validate_layer_report(selection["candidate"], now)
+    validate_layer_report(selection["candidate"], now, selection["prepared_at"])
 
 def verify_bundle_digest(raw, recorded, workflow_output):
     actual = "sha256:" + hashlib.sha256(raw).hexdigest()
@@ -269,7 +290,7 @@ def release_notes(state, image=None):
                f"Introduced HIGH/CRITICAL: {len(assessment['introduced_high_critical'])}; "
                f"new upstream findings: {len(new_upstream) if new_upstream is not None else 'first approved baseline not established'}; "
                f"emergency-blocked: {len(assessment['emergency_blocked'])}; secret detections: {len(assessment['secrets'])}. "
-               f"Classified non-live credential fingerprints: {len(classifications)} (details attached); unclassified layer detections: 0.")
+               f"Classified non-sensitive credential findings: {len(classifications)} (details attached); unclassified layer detections: 0.")
     return (f"Validated custom image: `{image or release.IMAGE}@{state['image_digest']}`\n"
             f"Official upstream: `ghcr.io/openhands/agent-server@{state['upstream_digest']}`\n"
             f"Agent Server: {state['agent_server_version']}. Previous immutable releases remain available for rollback.\n\n"

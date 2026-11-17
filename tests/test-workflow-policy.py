@@ -94,7 +94,7 @@ class WorkflowPolicyTests(unittest.TestCase):
                 self.assertEqual(result.returncode == 0, accepted)
 
 
-    def test_actual_dual_layer_step_collects_both_failures_and_stays_blocking(self):
+    def test_actual_dual_layer_command_propagates_scanner_failure(self):
         workflow = yaml.safe_load(Path('.github/workflows/policy-review.yml').read_text())
         step = next(s for s in workflow['jobs']['integration']['steps'] if s.get('name') == 'Inspect layers for credentials')
         with tempfile.TemporaryDirectory() as directory:
@@ -104,7 +104,7 @@ class WorkflowPolicyTests(unittest.TestCase):
             (root/'Dockerfile').write_text('ARG UPSTREAM_IMAGE=upstream-fixture\n')
             commands = {
                 'docker': '#!/bin/sh\nexit 0\n',
-                'python3': '#!/bin/sh\nif [ "$1" = tests/test-image-layers.py ]; then echo "$2" >> "$CALLS"; if [ "$2" = local-pr-validation ]; then exit "$CANDIDATE_FAIL"; else exit "$UPSTREAM_FAIL"; fi; fi\nexit 0\n',
+                'python3': '#!/bin/sh\nif [ "$1" = tests/test-image-layers.py ]; then echo "$2 $3" >> "$CALLS"; if [ "$CANDIDATE_FAIL" != 0 ]; then exit "$CANDIDATE_FAIL"; else exit "$UPSTREAM_FAIL"; fi; fi\nexit 0\n',
             }
             for name, body in commands.items():
                 path = fakebin/name
@@ -117,7 +117,7 @@ class WorkflowPolicyTests(unittest.TestCase):
                            UPSTREAM_FAIL=str(upstream), CANDIDATE_FAIL=str(candidate))
                 result = subprocess.run(['bash', '-e', '-c', step['run']], cwd=root, env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode == 0, upstream == candidate == 0)
-                self.assertEqual(calls.read_text().splitlines(), ['upstream-fixture', 'local-pr-validation'])
+                self.assertEqual(calls.read_text().splitlines(), ['local-pr-validation upstream-fixture'])
 
     def test_automatic_publisher_is_gated_and_never_rebuilds(self):
         workflow = yaml.safe_load(Path('.github/workflows/release.yml').read_text())

@@ -161,7 +161,7 @@ class ImmutableAssetsTests(unittest.TestCase):
         self.assertIn('Custom image security: PASS', notes)
         self.assertIn('Inherited upstream security: reported, not automatically blocked', notes)
         self.assertIn('Introduced HIGH/CRITICAL: 0', notes)
-        self.assertIn('Classified non-live credential fingerprints: 1', notes)
+        self.assertIn('Classified non-sensitive credential findings: 1', notes)
         self.assertNotIn('Accepted findings', notes)
 
     def test_archive_retains_exact_policy_scans_and_state(self):

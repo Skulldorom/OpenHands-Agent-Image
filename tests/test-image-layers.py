@@ -38,7 +38,12 @@ def check_layers(stream):
                         if match:
                             # Only categorical diagnostics: never matched bytes or context.
                             diagnostic = {
+                                "archive_member": member.name,
                                 "rule": match.lastgroup,
+                                "pem_footer_present": b"-----END PRIVATE KEY-----" in raw,
+                                "pem_payload_after_header": bool(re.match(rb"[ \r\n\t]+[A-Za-z0-9+/=]{32,}", raw[match.end():])),
+                                "marker_count": len(list(CREDENTIAL.finditer(raw))),
+                                "next_byte_printable": bool(raw[match.end():match.end()+1]) and 32 <= raw[match.end()] <= 126,
                                 "length": len(match.group()),
                                 "offset": match.start(),
                                 "file_size": len(raw),

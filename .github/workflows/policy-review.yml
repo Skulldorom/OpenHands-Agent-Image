@@ -85,6 +85,7 @@ jobs:
           base = inspect(sys.argv[1])
           candidate = inspect("local-pr-validation")
           assert candidate[:len(base)] == base, "Candidate base layers differ"
+          print("Upstream diff IDs: " + json.dumps(base))
           print(f"Verified upstream layer prefix: {len(base)} of {len(candidate)} layers; layer 7 inherited={len(base) >= 7}")
           PYCODE
           timeout 15m python3 tests/test-image-layers.py local-pr-validation

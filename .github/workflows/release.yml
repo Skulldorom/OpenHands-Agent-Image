@@ -177,6 +177,10 @@ jobs:
           sha256sum .cache/trivy/db/trivy.db | tee scanner-database.sha256
           tar -czf scanner-database.tar.gz -C .cache/trivy db
           trivy version --format json > scanner-version.json
+      - name: Verify previous approved upstream baseline
+        id: baseline
+        if: steps.plan.outputs.validate == 'true'
+        run: python3 scripts/promotion.py baseline
       - name: Complete unsuppressed candidate inventory
         if: steps.plan.outputs.validate == 'true'
         env:
@@ -190,11 +194,17 @@ jobs:
         if: steps.plan.outputs.validate == 'true'
         env:
           UPSTREAM: ${{ steps.plan.outputs.upstream }}
+          PREVIOUS_UPSTREAM: ${{ steps.baseline.outputs.previous_upstream }}
         run: |
           trivy image --cache-dir .cache/trivy --skip-db-update --skip-java-db-update \
             --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL --ignorefile /dev/null --ignore-unfixed=false \
             --list-all-pkgs --format json --output upstream-trivy.json --timeout 15m \
             "ghcr.io/openhands/agent-server@$UPSTREAM"
+          if [[ -n "$PREVIOUS_UPSTREAM" ]]; then
+            trivy image --cache-dir .cache/trivy --skip-db-update --skip-java-db-update \
+              --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL --ignorefile /dev/null --ignore-unfixed=false \
+              --list-all-pkgs --format json --output previous-upstream-trivy.json --timeout 15m "$PREVIOUS_UPSTREAM"
+          fi
           curl --fail --show-error --silent --retry 3 --max-time 120 \
             https://security-tracker.debian.org/tracker/data/json > debian-tracker.json
           sha256sum --check scanner-database.sha256
@@ -206,9 +216,11 @@ jobs:
         run: |
           python3 scripts/security-assessment.py --candidate trivy.json --upstream upstream-trivy.json \
             --policy security/policy.json --tracker debian-tracker.json \
-            --candidate-ref "$IMAGE@$DIGEST" --upstream-ref "ghcr.io/openhands/agent-server@$UPSTREAM" --report-only
-          python3 -c 'import json,os; d=json.load(open("security-assessment.json")); f=open(os.environ["GITHUB_STEP_SUMMARY"],"a"); f.write("\n## Modification security: " + ("PASS" if d["modification_pass"] else "FAIL") + "\nIntroduced HIGH/CRITICAL: " + str(len(d["introduced_high_critical"])) + "; detected secrets: " + str(len(d["secrets"])) + "\nInherited and other origins: " + str(d["origin_counts"]) + "\n")'
-      - name: Modification security gate (introduced HIGH/CRITICAL and all secrets)
+            --candidate-ref "$IMAGE@$DIGEST" --upstream-ref "ghcr.io/openhands/agent-server@$UPSTREAM" \
+            --baseline upstream-baseline.json --previous-upstream previous-upstream-trivy.json --report-only > security-summary.txt
+          cat security-summary.txt
+          cat security-summary.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Custom image security gate (introduced risk, worsening and all secrets)
         if: steps.plan.outputs.validate == 'true'
         run: |
           python3 -c 'import json; assert json.load(open("security-assessment.json"))["modification_pass"], "Introduced risk or secrets detected"'
@@ -244,6 +256,8 @@ jobs:
             trivy.json
             package-inventory.txt
             upstream-trivy.json
+            upstream-baseline.json
+            previous-upstream-trivy.json
             scanner-version.json
             scanner-database.sha256
             scanner-database.tar.gz

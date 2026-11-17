@@ -27,7 +27,7 @@ def group(assessment):
                             'vendor_trixie': [json.loads(v) for v in sorted({json.dumps(r.get('vendor_trixie'), sort_keys=True) for r in items})],
                             'metadata_sha256': sorted({r['metadata_sha256'] for r in items}),
                             'reachability': 'not established; requires component/CVE-specific evidence',
-                            'decision': 'blocking; no acceptance activated'}
+                            'decision': 'blocking' if any(r.get('blocking_reasons') for r in items) else 'reported; no automatic inherited-risk block'}
                            for name, items in sorted(components.items())]})
     return {'candidate': assessment['candidate'], 'upstream': assessment['upstream'],
             'instance_count': len(rows), 'distinct_cves': len(groups),

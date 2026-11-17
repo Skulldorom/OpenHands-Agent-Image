@@ -102,8 +102,8 @@ def download(run_id, attempt, digest, destination, historical=False):
     else:
         validate_functional(functional, state, run, candidate)
         jobs = api(f"actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100")["jobs"]
-        required = {"Build candidate once with SBOM and provenance", "Git, PostgreSQL 17, Agent Server API, and signals",
-                    "Layer security and package inventory", "Attest image build", "Attest functional evidence"}
+        required = {"Git, PostgreSQL 17, Agent Server API, and signals",
+                    "Layer security and package inventory", "Attest functional evidence"}
         assert any(required <= {s["name"] for s in job["steps"] if s["status"] == "completed" and s["conclusion"] == "success"}
                    for job in jobs), "Trusted validation steps incomplete"
     destination = Path(destination)
@@ -112,7 +112,8 @@ def download(run_id, attempt, digest, destination, historical=False):
         (destination / name).write_bytes(data)
     (destination / "evidence.zip").write_bytes(raw)
     if not historical:
-        verify_signature("oci://" + candidate, run)
+        import release
+        release.verify_candidate(digest, state)
         verify_signature(str(destination / "functional-pass.json"), run)
     (destination / "trusted-run.json").write_text(json.dumps(run, indent=2) + "\n")
     return state

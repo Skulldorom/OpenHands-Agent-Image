@@ -43,7 +43,11 @@ jobs:
             https://security-tracker.debian.org/tracker/data/json > debian-tracker.json
           python3 scripts/security-assessment.py --candidate candidate-trivy.json --upstream upstream-trivy.json \
             --policy security/policy.json --tracker debian-tracker.json --candidate-ref "$candidate" \
-            --upstream-ref "ghcr.io/openhands/agent-server@$upstream" --report-only
+            --upstream-ref "ghcr.io/openhands/agent-server@$upstream" --report-only > security-summary.txt
+          cat security-summary.txt
+          cat security-summary.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Require exact-upstream custom security policy
+        run: python3 -c 'import json; assert json.load(open("security-assessment.json"))["pass"], "Custom risk, emergency block or secrets prevent release"'
       - name: Group all HIGH and CRITICAL instances without suppressing findings
         run: python3 scripts/group-security-inventory.py security-assessment.json
       - name: Inspect compiled Go reachability without executing candidate tools

@@ -1,38 +1,56 @@
 # Security and release policy
 
-Current work: [credential-layer investigation](security/CREDENTIAL-LAYER-INVESTIGATION.md), [complete grouped HIGH/CRITICAL inventory](security/HIGH-CRITICAL.md), [prioritized reachability assessment](security/PRIORITY-ASSESSMENT.md), and [isolated publication test setup](security/PUBLICATION-TEST-SETUP.md). The Node-cache marker was a false positive; real PEM payloads and tokens remain blocking. Hosted publication is still unverified and the fresh security assessment still blocks 530 instances. Compose 5.7.2 now passes [official checksum and binary verification](security/COMPOSE-VERIFICATION.md); the earlier failure was missing redirect handling. Its embedded x/net v0.60.0 remains affected, so this resolves the evidence failure without clearing the vulnerability or upgrading the candidate image.
+## Official upstream baseline
 
-## Mandatory gates
+This image extends `ghcr.io/openhands/agent-server`. The official exact upstream digest is our security baseline. We report all inherited vulnerabilities without pretending they are fixed, unreachable or harmless. Unchanged inherited HIGH/CRITICAL vulnerabilities do not automatically prevent release, whether or not a fix is advertised. There are no ordinary inherited-risk exception records, approval renewals or per-CVE expiry matches.
 
-Scan exact upstream and candidate with Trivy 0.69.3 and one frozen database. Preserve complete unsuppressed UNKNOWN through CRITICAL results; no severity suppression or ignore-unfixed exclusions. Publication requires successful real functional tests, signed build/test provenance, exact candidate/base/source binding, sealed same-run artifacts, current policy fingerprints and scans no older than 24 hours. Missing, inconsistent, expired or failed evidence blocks.
+The audit stays enabled. A passing customization comparison is not a claim that the image is vulnerability-free or universally safe. Operators still need to assess whether official OpenHands is suitable for their workloads. Compatible upstream updates are monitored daily and bring upstream security improvements automatically. New Agent Server versions require explicit runtime-contract compatibility review; currently only 1.62.0 is approved.
 
-Always block secrets (including upstream), introduced HIGH/CRITICAL findings, unsupported runtime contracts and explicitly unacceptable CVEs in `high_risk_cves`. Inherited HIGH/CRITICAL findings require reviewed individual acceptance even without an advertised fix. Lower severity findings remain visible; explicitly unacceptable CVEs block at any severity. A policy designation cannot be overridden by an acceptance.
+## Mandatory release gates
 
-## Equivalent inherited-risk acceptance
+Publication requires all of the following:
 
-`security/policy.json` contains active `exceptions` and allowed approvers. They are empty. Seven records in `security/proposed-acceptances.json` remain proposed, not authorized. Approval must come from the responsible maintainer through reviewed policy changes, never from automation. No recurring per-candidate approval is required after acceptable policy is established.
+- Complete unsuppressed UNKNOWN through CRITICAL scans of the exact candidate and exact upstream base with Trivy 0.69.3 and one frozen database. No ignore-unfixed or directory/severity suppression.
+- No HIGH/CRITICAL vulnerability added by our image relative to that base. Comparison binds CVE, package, installed version, affected target, result class/type and severity. A CVE in one upstream binary never authorizes the same CVE in a custom-added binary.
+- No materially worsened inherited vulnerability. Increased severity blocks. Any changed version that remains vulnerable to the same CVE in the same target is conservatively treated as potential worsening, even at lower severity; we do not guess version ordering across Debian, Go and other ecosystems. Remediate the changed vulnerable component; if vulnerability disappears, it is reported removed. Same-version severity reductions remain visible as improvements.
+- No detected credential or secret material, including upstream layers, until classification resolves the detection. Full saved-layer inspection catches material hidden by later deletion/whiteouts. The existing PEM payload classification excludes only format constants without key material, with adversarial tests; it does not ignore caches, directories or real keys/tokens.
+- No match against an explicitly reviewed emergency block, at any severity.
+- Passing Git identity, PostgreSQL initialization/query/backup/restore, Agent Server readiness/API/entrypoint/signals and metadata/compatibility tests.
+- Verified original signed build provenance, exact source/base/image binding, signed same-run functional evidence, sealed artifact hashes, fresh scans (24-hour limit), current policy fingerprints and current main/upstream identity. Missing, failed, incomplete, stale, suppressed or unverifiable evidence blocks publication.
 
-Each acceptance binds exact CVE, package/module, installed version, binary/filesystem target, result class/type, official upstream origin, advisory metadata hash, justification, exposure assumptions, compensating controls, responsible approver, approval date and expiry. OS scope `os` represents the scanned Debian root filesystem, not a mutable image reference. The metadata fingerprint covers severity, fixed version, status, CVSS, references, title, description and advisory source.
+Functional build success never authorizes publication on its own. Main pushes and manual dispatch always build a fresh candidate; scheduled checks reuse only provenance-verified candidates when image inputs are unchanged. Every selected candidate gets fresh complete validation and security assessment. The security policy change itself therefore requires a fresh assessment. PRs never publish production images.
 
-Equivalent risk can survive upstream digest changes only after rescanning both exact images and demonstrating the same inherited finding, version, target, metadata and exposure assumptions. Changed advisory evidence, severity, available fix, target, installed version or assumptions requires reassessment. Duplicate, unused, unapproved, expired or mismatched active records fail closed. Accepted findings retain all original reasons and appear in complete reports and release notes. Acceptance does not mean safe or fixed.
+## Emergency denylist
 
-## Initial unresolved review
+`security/policy.json` has schema 2 and a small `emergency_blocks` list, initially empty. Each record requires an exact `cve`, a meaningful `reason`, `reviewed_by`, `reviewed_at` (ISO date, not future-dated) and an HTTPS `evidence_url` linking the review/advisory. Reviewed policy changes add/remove emergency blocks; automation does not create them from severity counts. Duplicate/malformed records and obsolete acceptance fields fail closed. A matching vulnerability cannot be waived by inheritance or ordinary exception records.
 
-Historical evidence run `43876785488` identifies seven proposed instances, all still unapproved:
+The five former `high_risk_cves` entries were reviewed for migration:
 
-| CVE | Package/version | Target |
+| Former CVE | Recorded rationale | Migration decision |
 | --- | --- | --- |
-| CVE-2026-6653 | libxml2 2.12.7+dfsg+really2.9.14-2.1+deb13u3 | Debian root filesystem |
-| CVE-2026-78661 | golang.org/x/net v0.61.0 | usr/bin/gh |
-| CVE-2026-78661 | golang.org/x/net v0.60.0 | usr/bin/rootlesskit |
-| CVE-2026-41567 | github.com/docker/docker v28.5.2+incompatible | usr/libexec/docker/cli-plugins/docker-buildx |
-| CVE-2026-42306 | github.com/docker/docker v28.5.2+incompatible | usr/libexec/docker/cli-plugins/docker-buildx |
-| CVE-2026-17106 | github.com/moby/go-archive v0.2.0 | usr/libexec/docker/cli-plugins/docker-buildx |
-| CVE-2026-78661 | golang.org/x/net v0.60.0 | usr/libexec/docker/cli-plugins/docker-compose |
+| CVE-2026-6653 | General XML exposure; unreachability not proven | Report inherited risk; no documented emergency prohibition |
+| CVE-2026-78661 | Network tools affected; vendor binary still vulnerable | Report inherited risk; no documented emergency prohibition |
+| CVE-2026-17106 | Potential archive/build-input exposure | Report inherited risk; no documented emergency prohibition |
+| CVE-2026-41567 | Embedded Docker code; unreachability not proven | Report inherited risk; no documented emergency prohibition |
+| CVE-2026-42306 | Embedded Docker code; unreachability not proven | Report inherited risk; no documented emergency prohibition |
 
-These CVEs remain explicitly unacceptable. They need supported remediation or a separately reviewed policy decision changing that designation, with current evidence and justified exact acceptance. Reassessment of the authenticated historical scans under this stricter policy reports **530 blocking finding instances**, zero introduced HIGH/CRITICAL findings and zero detected secrets. All 530 inherited instances require remediation or individual review, not just the seven proposals. The CI artifact retains their complete package/version/target/advisory inventory. Historical reports are not a current vulnerability inventory. `v1.0.0` is not authorized by this PR.
+Those rationales describe potential upstream exposure and absent remediation, rather than a separately documented emergency/incident prohibition. They are retired as automatic inherited blockers under the owner’s requested baseline policy. Their findings stay in complete reports. This is not an exploitability or safety finding; future documented evidence can justify explicit emergency blocks.
 
-Controls such as trusted workloads, network isolation, credential minimization, no Docker socket and no privileged containers depend on host/operator enforcement. This public image cannot enforce them. No deployment configuration or exploitability exclusion is claimed. Report security issues privately to the repository maintainer; do not include credentials or customer data in public issues.
+## Reporting and upstream changes
+
+CI summaries and release notes distinguish **Custom image security: PASS/FAIL** from **Inherited upstream security: reported, not automatically blocked**. The separate release gate can still fail an emergency block when the customization comparison passes.
+
+Every report includes both image digests, upstream/candidate severity totals, inherited-unchanged/introduced/removed/materially-worsened counts, introduced HIGH/CRITICAL findings, emergency matches and detected secrets. Complete raw Trivy reports, scanner identity, frozen database/hash, comparison, policy, source/build/test evidence and baseline descriptor are attached to immutable release evidence. A new reassessment appends its own content-addressed archive and never overwrites the original approval or release source.
+
+The previous approved release’s original approval archive is checked against its immutable SHA-256 commitment to identify the previous official upstream digest. That previous digest is rescanned with the same scanner/database as both current images. New upstream findings are highlighted independently of custom additions; they do not become custom blockers solely because they appeared upstream. Database disclosures common to both upstream versions are not mislabeled image regressions. The first release explicitly reports that a previous approved baseline is unavailable, rather than claiming zero new upstream risks. Missing baseline evidence or scan failures block; a concurrent baseline change requires reassessment.
+
+Initial release remains v1.0.0, later releases default to patch, explicit version bumps remain available, and byte-identical images reuse the existing release unless explicitly bumped. Immutable tags, latest ownership, pending-publication recovery and rollback remain enforced. A pending reserved digest must be recovered before a different candidate publishes; superseded pending upstream/content requires maintainer review. Production GitHub/GHCR publication and recovery remain untested end to end.
+
+## Historical assessments
+
+[HIGH/CRITICAL inventory](security/HIGH-CRITICAL.md), [priority assessment](security/PRIORITY-ASSESSMENT.md), the inactive `security/proposed-acceptances.json`, [credential investigation](security/CREDENTIAL-LAYER-INVESTIGATION.md) and [Compose verification](security/COMPOSE-VERIFICATION.md) retain historical evidence. Old blanket-block decisions and acceptance proposals are historical, have no active publication role, and are superseded by schema 2. The recorded comparison had 530 inherited HIGH/CRITICAL instances, zero introduced HIGH/CRITICAL and zero detected secrets; CI reassesses authenticated scans and also collects fresh audit evidence. Historical scans never substitute for fresh production evidence.
+
+Report security issues privately to the repository maintainer. Do not put credentials or customer data in public issues.
 
 ## Operator-only exposure verification
 
@@ -93,10 +111,7 @@ Recommended controls pending review: no host Docker socket or daemon credentials
 no privileged execution or host namespaces, no sensitive host mounts, drop
 unneeded capabilities, enforce seccomp/AppArmor, least-privilege ephemeral
 credentials, restrict egress and isolate untrusted workloads. These are proposed
-controls, not observations about the live LXC. All remaining inherited HIGH
-findings are insufficiently assessed for acceptance until their exact current
-package/version/target and reachable functions have been reviewed. No additional
-risk acceptance is activated by this remediation.
+controls, not observations about the live LXC. Inherited risk remains the operator’s responsibility; it is reported without requiring per-CVE approval.
 
 ## Isolated publication integration prerequisites
 
@@ -124,34 +139,3 @@ checks immutable tags and the test alias, and rejects an older version after a
 new reservation. Cleanup is opt-in after success and deletes only recorded IDs
 whose identity still matches; failures retain the ledger and evidence. Never
 point it at the production repository/package, even for cleanup.
-
-## Fresh exact-candidate audit — 2026-11-17
-
-Run: https://github.com/Skulldorom/OpenHands-Agent-Image/actions/runs/44052745185
-at code `da349ebdc51c8d666feb6eb5869b001be4e55243`.
-Candidate `sha256:0e8e24ac5258ae9d709886fc3298cb1f028b25146e4c01389056c1fa762e81a0`;
-actual upstream `sha256:e74009d51a352c3e9e8db30a788b15683de060c0b2f9e71e0b9d19576034c995`.
-Both were rescanned unsuppressed with the same frozen database.
-Artifact `14314048804`, digest
-`sha256:d4dbfae5025927a2a48445b80b5415739b9c01edba73974f662cc8cb8de34fed`,
-retains raw reports, scanner/database identity, Debian tracker and complete
-per-package/target assessment.
-
-Current inventory: **2,512 finding instances, 1,040 distinct CVEs**:
-1 CRITICAL, 529 HIGH, 794 MEDIUM, 1,152 LOW, 36 UNKNOWN.
-2,461 inherited instances; 51 added-package instances, none HIGH/CRITICAL.
-Zero introduced HIGH/CRITICAL; zero Trivy-detected secrets. There are 21 instances
-with an advertised fix; module fixes are not proof of an available supported
-binary. All 530 HIGH/CRITICAL instances block. This supersedes historical counts,
-not the original approval evidence. The scan workflow succeeded in collecting
-evidence; the **security gate did not pass**.
-
-The earlier layer failure in run `44052745007` has been resolved: the Node cache
-contained a PEM format-boundary constant, not key material. The corrected detector
-and regressions passed hosted upstream/candidate saved-layer inspection in run
-`44084622927`; current work reruns these checks against its final SHA. See
-[the investigation](security/CREDENTIAL-LAYER-INVESTIGATION.md) for exact rule and
-upstream-layer provenance. No binary-cache or directory exclusion was added.
-Merge readiness still requires the requested external sandbox publication test;
-production release eligibility is independently blocked by the security baseline.
-No production release or live LXC change occurred.

@@ -116,6 +116,39 @@ class ImmutableAssetsTests(unittest.TestCase):
         self.assertEqual(len(self.requests), 1)
         self.assertNotIn('body=', ' '.join(self.requests[0]))
 
+    def test_initial_upstream_baseline_is_explicitly_unavailable(self):
+        self.assertEqual(promotion.approved_baseline({}, self.backend), {'upstream': None, 'version': None, 'approval_sha256': None})
+        promotion.verify_baseline_owner({'upstream': None, 'version': None, 'approval_sha256': None}, [])
+
+    def test_baseline_requires_committed_original_approval(self):
+        owner = {'version': '1.0.0', 'image_digest': 'sha256:' + 'a'*64, 'upstream_digest': 'sha256:' + 'b'*64}
+        Path('state.json').write_text(json.dumps(owner))
+        original = promotion.evidence_archive()
+        descriptor = promotion.evidence_descriptor(original)
+        record = {'id': 1, 'tag_name': 'v1.0.0', 'draft': False,
+                  'body': '<!-- release-state:' + json.dumps(owner) + ' -->\n<!-- release-evidence:' + json.dumps(descriptor) + ' -->'}
+        with patch.object(self.backend, 'records', return_value=[record]), patch.object(promotion.release, 'gh', return_value='[[]]'), patch.object(self.backend, 'recover_original', return_value=original):
+            baseline = promotion.approved_baseline({'previous_approved': owner}, self.backend)
+            self.assertEqual(baseline['upstream'], 'ghcr.io/openhands/agent-server@' + owner['upstream_digest'])
+            promotion.verify_baseline_owner(baseline, [record])
+            with patch.object(self.backend, 'recover_original', return_value=b'tampered'), self.assertRaisesRegex(AssertionError, 'commitment mismatch'):
+                promotion.approved_baseline({'previous_approved': owner}, self.backend)
+            for field in ('version', 'upstream', 'approval_sha256'):
+                with self.assertRaisesRegex(AssertionError, 'baseline changed'):
+                    promotion.verify_baseline_owner(dict(baseline, **{field: 'different'}), [record])
+            with self.assertRaises(AssertionError):
+                promotion.verify_baseline_owner({'upstream': None, 'version': None, 'approval_sha256': None}, [record])
+
+    def test_prior_evidence_schema_recovery_keeps_original_bytes(self):
+        names = promotion.SEALED_FILES - {'upstream-baseline.json', 'previous-upstream-trivy.json'}
+        files = {n: Path(n).read_bytes() for n in names}
+        files['selection.json'] = json.dumps({'files': {n: hashlib.sha256(files[n]).hexdigest() for n in names}}).encode()
+        original = promotion.evidence_archive(files)
+        descriptor = {'sha256': hashlib.sha256(original).hexdigest(), 'run_id': 1, 'run_attempt': 1}
+        artifacts = {'artifacts': [{'id': 4, 'name': 'validation-1-1', 'expired': False}]}
+        with patch.object(promotion.release, 'gh', return_value=json.dumps(artifacts)), patch.object(promotion.subprocess, 'check_output', return_value=original):
+            self.assertEqual(self.backend.recover_original(descriptor), original)
+
     def test_archive_retains_exact_policy_scans_and_state(self):
         with zipfile.ZipFile(io.BytesIO(self.raw)) as archive:
             self.assertIn('security/policy.json', archive.namelist())

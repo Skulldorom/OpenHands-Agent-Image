@@ -19,6 +19,7 @@ class PublicationTests(unittest.TestCase):
         self.state = {"upstream_digest": "sha256:" + "b" * 64}
         self.functional = {"pass": True, "candidate": module.IMAGE + "@" + self.digest}
         self.assessment = {"policy_sha256": hashlib.sha256(json.dumps(self.policy, sort_keys=True).encode()).hexdigest(),
+                           "schema": 2, "materially_worsened": [], "emergency_blocked": [],
                            "pass": True, "modification_pass": True, "blockers": [], "secrets": [], "introduced_high_critical": [],
                            "candidate": self.functional["candidate"], "upstream": "ghcr.io/openhands/agent-server@" + self.state["upstream_digest"]}
 
@@ -30,7 +31,7 @@ class PublicationTests(unittest.TestCase):
 
     def test_failure_missing_and_mismatched_assessment_blocks(self):
         for field, value in {"pass": False, "modification_pass": False, "blockers": [{}], "secrets": [{}],
-                             "introduced_high_critical": [{}], "candidate": "wrong", "upstream": "wrong", "policy_sha256": "wrong"}.items():
+                             "introduced_high_critical": [{}], "materially_worsened": [{}], "emergency_blocked": [{}], "schema": 1, "candidate": "wrong", "upstream": "wrong", "policy_sha256": "wrong"}.items():
             with self.subTest(field=field):
                 old = deepcopy(self.assessment)
                 self.assessment[field] = value
@@ -41,13 +42,9 @@ class PublicationTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.validate()
 
-    def test_expired_acceptance_rechecked_at_promotion(self):
-        record = deepcopy(json.loads(Path("security/proposed-acceptances.json").read_text())["records"][0])
-        record.update(status="approved", approved_by="Skulldorom",
-                      approval_date=(date.today() - timedelta(days=2)).isoformat(),
-                      expires=(date.today() - timedelta(days=1)).isoformat())
-        self.policy["exceptions"] = [record]
-        self.assessment["policy_sha256"] = hashlib.sha256(json.dumps(self.policy, sort_keys=True).encode()).hexdigest()
+    def test_obsolete_policy_fields_rejected_at_promotion(self):
+        self.policy['exceptions'] = []
+        self.assessment['policy_sha256'] = hashlib.sha256(json.dumps(self.policy, sort_keys=True).encode()).hexdigest()
         with self.assertRaises(AssertionError):
             self.validate()
 

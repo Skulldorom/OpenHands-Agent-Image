@@ -11,13 +11,14 @@ import re
 import subprocess
 import sys
 import tempfile
+import tarfile
 import zipfile
 import urllib.error
 
 import evidence
 import release
 
-SEALED_FILES = evidence.FILES | {"security-assessment.json", "security-assessment.md", "scanner-database.tar.gz", "security/policy.json"}
+SEALED_FILES = evidence.FILES | {"security-assessment.json", "security-assessment.md", "scanner-database.tar.gz", "security/policy.json", "upstream-baseline.json", "previous-upstream-trivy.json"}
 
 def policy_hash():
     return hashlib.sha256(Path("security/policy.json").read_bytes()).hexdigest()
@@ -31,13 +32,27 @@ def check_selection(state, source_fingerprint, current_fingerprint, upstream):
 def validate_fresh_scans(selection, now):
     prepared = datetime.fromisoformat(selection["prepared_at"])
     assert timedelta(0) <= now - prepared <= timedelta(hours=24), "Security evidence expired"
-    for name in ("trivy.json", "upstream-trivy.json"):
+    baseline = json.loads(Path("upstream-baseline.json").read_text())
+    previous = json.loads(Path("previous-upstream-trivy.json").read_text())
+    names = ["trivy.json", "upstream-trivy.json"]
+    if baseline["upstream"] is not None:
+        assert previous is not None and previous["ArtifactName"] == baseline["upstream"], "Unbound previous upstream scan"
+        names.append("previous-upstream-trivy.json")
+    else:
+        assert previous is None, "Unexpected previous upstream scan"
+    for name in names:
         scan = json.loads(Path(name).read_text())
         created = datetime.fromisoformat(scan["CreatedAt"].replace("Z", "+00:00"))
         assert prepared <= created <= now, "Scan predates validation or is future-dated"
         assert scan["Trivy"]["Version"] == "0.69.3", "Unapproved scanner"
     assert json.loads(Path("scanner-version.json").read_text())["Version"] == "0.69.3"
-    assert re.fullmatch(r"[a-f0-9]{64}\s+\.cache/trivy/db/trivy\.db\s*", Path("scanner-database.sha256").read_text())
+    expected = Path("scanner-database.sha256").read_text()
+    assert re.fullmatch(r"[a-f0-9]{64}\s+\.cache/trivy/db/trivy\.db\s*", expected)
+    with tarfile.open("scanner-database.tar.gz", "r:gz") as archive:
+        matches = [m for m in archive.getmembers() if m.name == "db/trivy.db"]
+        assert len(matches) == 1 and matches[0].isfile() and matches[0].size < 2_000_000_000
+        with archive.extractfile(matches[0]) as database:
+            assert hashlib.file_digest(database, "sha256").hexdigest() == expected.split()[0], "Frozen scanner database changed"
 
 def prepare(digest):
     state = json.loads(Path("state.json").read_text())
@@ -87,7 +102,7 @@ def assert_fresh(state):
     assert state["fingerprints"] == release.fingerprints(state["upstream_digest"]), "Authorization inputs changed"
 
 def evidence_archive(files=None):
-    names = SEALED_FILES | {"selection.json", "security/policy.json"}
+    names = set(files) if files is not None else SEALED_FILES | {"selection.json", "security/policy.json"}
     assert len({Path(n).name for n in names}) == len(names), "Evidence filename collision"
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -185,7 +200,9 @@ class GitHubRegistry:
         raw = subprocess.check_output(["gh", "api", f"repos/{self.repo}/actions/artifacts/{matches[0]['id']}/zip"])
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             assert len(archive.namelist()) == len(set(archive.namelist()))
-            names = SEALED_FILES | {"selection.json", "security/policy.json"}
+            selection = json.loads(archive.read("selection.json"))
+            names = set(selection["files"]) | {"selection.json"}
+            assert evidence.FILES <= names and names <= SEALED_FILES | {"selection.json"}, "Unknown original approval schema"
             assert all(archive.getinfo(n).file_size < 200_000_000 for n in names)
             restored = evidence_archive({n: archive.read(n) for n in names})
         assert hashlib.sha256(restored).hexdigest() == descriptor["sha256"], "Original approval commitment mismatch"
@@ -224,13 +241,67 @@ class GitHubRegistry:
 
 def release_notes(state, image=None):
     assessment = json.loads(Path("security-assessment.json").read_text())
-    return (f"Validated image: `{image or release.IMAGE}@{state['image_digest']}`\n"
-            f"Upstream: `ghcr.io/openhands/agent-server@{state['upstream_digest']}`\n"
-            f"Agent Server: {state['agent_server_version']}. Previous immutable releases remain available for rollback.\n"
-            f"Accepted findings (not suppressed): {json.dumps(assessment.get('accepted_exceptions', []))}. "
-            "Full inventories, advisory evidence and all four fingerprints are attached.\n\n"
+    counts = assessment["comparison_counts"]
+    new_upstream = assessment["new_upstream_findings"]
+    summary = (f"Custom image security: {'PASS' if assessment['modification_pass'] else 'FAIL'}. "
+               "Inherited upstream security: reported, not automatically blocked.\n"
+               f"Candidate severity totals: {assessment['severity_counts']}; upstream: {assessment['upstream_severity_counts']}.\n"
+               f"Inherited unchanged: {counts.get('inherited unchanged', 0)}; introduced: {counts.get('introduced', 0)}; "
+               f"removed: {len(assessment['removed_findings'])}; worsened: {len(assessment['materially_worsened'])}.\n"
+               f"Introduced HIGH/CRITICAL: {len(assessment['introduced_high_critical'])}; "
+               f"new upstream findings: {len(new_upstream) if new_upstream is not None else 'first approved baseline not established'}; "
+               f"emergency-blocked: {len(assessment['emergency_blocked'])}; secret detections: {len(assessment['secrets'])}.")
+    return (f"Validated custom image: `{image or release.IMAGE}@{state['image_digest']}`\n"
+            f"Official upstream: `ghcr.io/openhands/agent-server@{state['upstream_digest']}`\n"
+            f"Agent Server: {state['agent_server_version']}. Previous immutable releases remain available for rollback.\n\n"
+            + summary + "\n\n"
+            "Complete unsuppressed scans, comparison, baseline, policy and build/test evidence are attached. "
+            "A passing comparison is not a vulnerability-free or universal safety claim.\n\n"
             "_Created by an AI-authored OpenHands workflow on behalf of the repository owner._\n"
             "<!-- release-state:" + json.dumps(state, sort_keys=True) + " -->")
+
+
+def approved_baseline(state, backend):
+    owner = state.get("previous_approved")
+    if owner is None:
+        return {"upstream": None, "version": None, "approval_sha256": None}
+    records = [r for r in backend.records() if r["tag_name"] == "v" + owner["version"] and not r["draft"]]
+    assert len(records) == 1, "Previous approved release unavailable"
+    record = records[0]
+    intent = release.journal_state(record)
+    assert intent["upstream_digest"] == owner["upstream_digest"] and intent["image_digest"] == owner["image_digest"]
+    descriptor = original_evidence(record)
+    assets = json.loads(release.gh("api", "--paginate", "--slurp", f"repos/{backend.repo}/releases/{record['id']}/assets?per_page=100"))
+    matches = [a for page in assets for a in page if a["name"] == descriptor["name"]]
+    assert len(matches) <= 1
+    raw = backend.asset_bytes(matches[0]) if matches else backend.recover_original(descriptor)
+    assert hashlib.sha256(raw).hexdigest() == descriptor["sha256"], "Previous approval commitment mismatch"
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        assert archive.getinfo("state.json").file_size < 1_000_000
+        original = json.loads(archive.read("state.json"))
+        assert original["upstream_digest"] == intent["upstream_digest"] and original["image_digest"] == intent["image_digest"]
+    return {"upstream": "ghcr.io/openhands/agent-server@" + intent["upstream_digest"],
+            "version": intent["version"], "approval_sha256": descriptor["sha256"]}
+
+
+def baseline():
+    state = json.loads(Path("state.json").read_text())
+    selection = approved_baseline(state, GitHubRegistry())
+    Path("upstream-baseline.json").write_text(json.dumps(selection, sort_keys=True, indent=2) + "\n")
+    Path("previous-upstream-trivy.json").write_text("null\n")
+    with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+        output.write("previous_upstream=" + (selection["upstream"] or "") + "\n")
+
+
+def verify_baseline_owner(baseline, records):
+    approved = sorted([r for r in records if not r["draft"]], key=lambda r: version_tuple(r["tag_name"][1:]))
+    if not approved:
+        assert baseline == {"upstream": None, "version": None, "approval_sha256": None}, "Unexpected approved baseline"
+        return
+    latest = approved[-1]
+    intent = release.journal_state(latest)
+    assert baseline == {"upstream": "ghcr.io/openhands/agent-server@" + intent["upstream_digest"],
+                        "version": intent["version"], "approval_sha256": original_evidence(latest)["sha256"]}, "Approved baseline changed during validation; reassess"
 
 def version_tuple(version):
     assert re.fullmatch(r"\d+\.\d+\.\d+", version)
@@ -303,12 +374,15 @@ def publish():
     load = lambda name: json.loads(Path(name).read_text())
     reassessed = module.assess(load("trivy.json"), load("upstream-trivy.json"), load("security/policy.json"),
                               load("debian-tracker.json"), release.IMAGE + "@" + selection["candidate"],
-                              "ghcr.io/openhands/agent-server@" + state["upstream_digest"])
+                              "ghcr.io/openhands/agent-server@" + state["upstream_digest"],
+                              load("previous-upstream-trivy.json"), load("upstream-baseline.json"))
     assert reassessed == load("security-assessment.json"), "Security reassessment differs from sealed decision"
     release.validate_publication_evidence(state, json.loads(Path("security-assessment.json").read_text()),
         json.loads(Path("functional-pass.json").read_text()), json.loads(Path("security/policy.json").read_text()), selection["candidate"])
-    state = release.select_release(state, release.release_records())
+    records = release.release_records()
+    verify_baseline_owner(load("upstream-baseline.json"), records)
+    state = release.select_release(state, records)
     release.write_state(reconcile(state, GitHubRegistry(), assert_fresh))
 
 if __name__ == "__main__":
-    {"prepare": lambda: prepare(sys.argv[2]), "publish": publish, "bundle": bundle}[sys.argv[1]]()
+    {"baseline": baseline, "prepare": lambda: prepare(sys.argv[2]), "publish": publish, "bundle": bundle}[sys.argv[1]]()

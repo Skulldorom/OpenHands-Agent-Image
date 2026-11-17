@@ -167,8 +167,10 @@ def run(args):
         collect()
         with tempfile.TemporaryDirectory(prefix='hosted-publication-') as directory:
             os.chdir(directory)
-            Path('security-assessment.json').write_text(json.dumps({'accepted_exceptions': [],
-                'integration_fixture': True, 'authorization': 'none'}))
+            Path('security-assessment.json').write_text(json.dumps({'integration_fixture': True, 'authorization': 'none',
+                'comparison_counts': {}, 'new_upstream_findings': None, 'modification_pass': True,
+                'severity_counts': {}, 'upstream_severity_counts': {}, 'removed_findings': [],
+                'materially_worsened': [], 'introduced_high_critical': [], 'emergency_blocked': [], 'secrets': []}))
             for name in promotion.SEALED_FILES - {'security-assessment.json'}:
                 path = Path(name)
                 path.parent.mkdir(parents=True, exist_ok=True)

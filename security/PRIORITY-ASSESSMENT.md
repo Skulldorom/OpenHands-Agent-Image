@@ -1,5 +1,8 @@
 # Release risk assessment — 2026-11-17
 
+> Historical assessment. Blanket inherited-risk blocking and approval proposals below are superseded by the current [upstream-baseline policy](../SECURITY.md). Findings remain evidence, not current release decisions.
+
+
 No acceptance is activated. Initial production release remains blocked. This document supersedes the release-readiness conclusions in the older `ASSESSMENT.md`; the older assessment is retained for its historical evidence, not as a current authorization or supported-version claim.
 
 ## Exact evidence and limits

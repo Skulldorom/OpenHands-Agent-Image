@@ -128,7 +128,7 @@ def main():
     if introduced:
         print("BLOCKED: this image introduced findings that have no upstream baseline; fix the Dockerfile change.")
     if remediable:
-        print("BLOCKED: a supported fixed artifact exists; apply it instead of recording an exception.")
+        print("BLOCKED: a supported fixed artifact exists; apply it before publication.")
     if undetermined:
         print("BLOCKED: at least one blocker has no recorded remediation verdict; inspect vendor artifacts first.")
     if args.summary:

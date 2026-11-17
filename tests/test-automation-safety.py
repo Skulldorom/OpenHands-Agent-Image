@@ -12,6 +12,7 @@ from unittest.mock import patch
 import urllib.error
 import io
 import zipfile
+import tarfile
 
 sys.path.insert(0, 'scripts')
 import promotion
@@ -91,7 +92,14 @@ class SafetyTests(unittest.TestCase):
                 for name in ('trivy.json', 'upstream-trivy.json'):
                     Path(name).write_text(json.dumps({'CreatedAt': stamp, 'Trivy': {'Version': '0.69.3'}}))
                 Path('scanner-version.json').write_text('{"Version":"0.69.3"}')
-                Path('scanner-database.sha256').write_text('a'*64 + '  .cache/trivy/db/trivy.db\n')
+                database = b'frozen test database'
+                Path('scanner-database.sha256').write_text(hashlib.sha256(database).hexdigest() + '  .cache/trivy/db/trivy.db\n')
+                with tarfile.open('scanner-database.tar.gz', 'w:gz') as archive:
+                    member = tarfile.TarInfo('db/trivy.db')
+                    member.size = len(database)
+                    archive.addfile(member, io.BytesIO(database))
+                Path('upstream-baseline.json').write_text(json.dumps({'upstream': None, 'version': None, 'approval_sha256': None}))
+                Path('previous-upstream-trivy.json').write_text('null')
                 os.environ.update(CANDIDATE_DIGEST='candidate', GITHUB_SHA='source', GITHUB_RUN_ID='123', GITHUB_RUN_ATTEMPT='1')
                 selection = {'candidate': 'candidate', 'policy_sha256': policy_hash, 'policy_commit': 'source',
                              'run_id': 123, 'run_attempt': 1, 'prepared_at': stamp, 'scanned_at': datetime.now(timezone.utc).isoformat(),
@@ -100,6 +108,15 @@ class SafetyTests(unittest.TestCase):
                 late = dict(selection, prepared_at=(datetime.now(timezone.utc) + timedelta(seconds=1)).isoformat())
                 with self.assertRaises(AssertionError):
                     promotion.validate_fresh_scans(late, datetime.now(timezone.utc))
+                original_manifest = Path('scanner-database.sha256').read_text()
+                Path('scanner-database.sha256').write_text('a'*64 + '  .cache/trivy/db/trivy.db\n')
+                with self.assertRaisesRegex(AssertionError, 'database changed'):
+                    promotion.validate_fresh_scans(selection, datetime.now(timezone.utc))
+                Path('scanner-database.sha256').write_text(original_manifest)
+                Path('upstream-baseline.json').write_text(json.dumps({'upstream': 'previous@sha256:' + 'b'*64}))
+                with self.assertRaisesRegex(AssertionError, 'Unbound'):
+                    promotion.validate_fresh_scans(selection, datetime.now(timezone.utc))
+                Path('upstream-baseline.json').write_text(json.dumps({'upstream': None}))
                 Path('trivy.json').write_text('altered')
                 with self.assertRaises(AssertionError):
                     promotion.recheck(selection, datetime.now(timezone.utc))

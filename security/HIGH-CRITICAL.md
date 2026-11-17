@@ -1,5 +1,8 @@
 # HIGH/CRITICAL inventory grouped by CVE
 
+> Historical assessment. Blanket inherited-risk blocking and approval proposals below are superseded by the current [upstream-baseline policy](../SECURITY.md). Findings remain evidence, not current release decisions.
+
+
 Candidate: `ghcr.io/skulldorom/openhands-agent@sha256:0e8e24ac5258ae9d709886fc3298cb1f028b25146e4c01389056c1fa762e81a0`
 
 Upstream: `ghcr.io/openhands/agent-server@sha256:e74009d51a352c3e9e8db30a788b15683de060c0b2f9e71e0b9d19576034c995`

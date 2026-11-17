@@ -22,7 +22,7 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(cve['components'][0]['targets'], ['bin/a', 'bin/b'])
         for component in cve['components']:
             self.assertEqual(component['advertised_fixes'], ['2'])
-            self.assertIn('no acceptance activated', component['decision'])
+            self.assertIn('no automatic inherited-risk block', component['decision'])
             self.assertIn('not established', component['reachability'])
         self.assertIn('3 instances; 1 distinct CVEs', inventory.markdown(report))
 

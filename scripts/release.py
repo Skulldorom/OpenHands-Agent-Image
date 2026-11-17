@@ -50,7 +50,7 @@ BUILD_INPUTS = ["Dockerfile", ".dockerignore", "scripts/init-git.sh"]
 INPUT_GROUPS = {
     "image": BUILD_INPUTS,
     "functional": ["compatibility.json", "scripts/validate-image.sh", "scripts/evidence.py", "tests/test-git-identity.sh", "tests/test-postgresql.sh", "tests/test-agent-startup.sh", "tests/test-image-layers.py"],
-    "security": ["security/policy.json", "security/vendor-evidence.json", "security/proposed-acceptances.json", "scripts/security-assessment.py", "scripts/promotion.py", ".github/workflows/release.yml"],
+    "security": ["security/policy.json", "security/vendor-evidence.json", "scripts/security-assessment.py", "scripts/promotion.py", ".github/workflows/release.yml"],
     "publishing": ["scripts/release.py", "scripts/promotion.py", ".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/workflows/upstream-update.yml"],
 }
 STATES = {"build_failed", "built", "functional_failed", "functional_passed", "security_failed", "validated", "published"}
@@ -249,7 +249,7 @@ def assert_candidate_tag_absent():
     raise AssertionError("Immutable candidate tag already exists: " + tag)
 
 
-def verify_candidate(digest):
+def verify_candidate(digest, state=None):
     import evidence
     # Verify the original build, not a newly asserted digest label. Trusted workflow
     # identity and original source must match the inspected immutable artifact.
@@ -257,7 +257,7 @@ def verify_candidate(digest):
     assert actual == digest
     labels = config["Labels"]
     source = labels["org.opencontainers.image.revision"]
-    state = json.loads(Path("state.json").read_text())
+    state = state if state is not None else json.loads(Path("state.json").read_text())
     assert labels["org.opencontainers.image.base.digest"] == state["upstream_digest"]
     assert hashlib.sha256((fingerprint(source) + "\0" + state["upstream_digest"] + "\0linux/amd64").encode()).hexdigest() == state["fingerprints"]["image"]
     evidence.verify_build_signature("oci://" + IMAGE + "@" + digest, source)
@@ -272,9 +272,8 @@ def validate_publication_evidence(state, assessment, functional, policy, digest)
     spec = importlib.util.spec_from_file_location("assessment", "scripts/security-assessment.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module.validate_exceptions(policy["exceptions"], module.date.today())
-    assert module.date.fromisoformat(policy["review_date"]) >= module.date.today(), "Security policy review overdue"
-    assert all(r["approved_by"] in policy["acceptance_approvers"] for r in policy["exceptions"])
+    module.validate_policy(policy)
+    assert assessment["schema"] == 2 and not assessment["materially_worsened"] and not assessment["emergency_blocked"]
 
 if __name__ == "__main__":
     {"plan": plan, "assert-candidate-tag-absent": assert_candidate_tag_absent,

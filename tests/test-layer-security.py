@@ -183,17 +183,30 @@ class LayerTests(unittest.TestCase):
                                          '-pkeyopt', 'ec_paramgen_curve:prime256v1'], stderr=subprocess.DEVNULL)
         match = layers.CREDENTIAL.search(value)
         material, _ = layers.pem_material(value, match)
-        policy = {'public_private_keys': [dict(material, source='https://example.invalid/public-fixture',
+        policy = {'public_private_keys': [dict(material, diff_id='sha256:'+'a'*64, file='test/source', source='https://example.invalid/public-fixture',
                    purpose='Synthetic public-fixture classification test')], 'layer_observations': []}
         for suffix, expected in [(b'', None), (b'\x00ghp_'+b'A'*36, 'github_token'),
                                  (b'\n-----BEGIN PRIVATE KEY-----\n'+b'B'*64, 'private_key')]:
             records = []
             with redirect_stdout(io.StringIO()):
-                self.assertEqual(layers.scan_file(io.BytesIO(value+suffix), policy=policy, classified=records), expected)
+                self.assertEqual(layers.scan_file(io.BytesIO(value+suffix), policy=policy, classified=records, diff_id='sha256:'+'a'*64, file_name='test/source'), expected)
             self.assertEqual(len(records), 1)
         altered = value.replace(value.splitlines()[1], b'A'*len(value.splitlines()[1]))
         with redirect_stdout(io.StringIO()):
-            self.assertEqual(layers.scan_file(io.BytesIO(altered), policy=policy), 'private_key')
+            self.assertEqual(layers.scan_file(io.BytesIO(altered), policy=policy, diff_id='sha256:'+'a'*64, file_name='test/source'), 'private_key')
+
+    def test_public_key_copied_into_a_new_layer_or_file_remains_blocking(self):
+        value = b'-----BEGIN PRIVATE KEY-----\n'+b'A'*64+b'\n-----END PRIVATE KEY-----'
+        material, _ = layers.pem_material(value, layers.CREDENTIAL.search(value))
+        fixture = dict(material, file='test/fixture', diff_id='sha256:'+'a'*64,
+                       source='https://example.invalid/public', purpose='synthetic public test fixture')
+        policy = dict(public_private_keys=[fixture], layer_observations=[])
+        for file, diff_id, expected in [('test/fixture', fixture['diff_id'], None),
+                                       ('etc/service.key', fixture['diff_id'], 'private_key'),
+                                       ('test/fixture', 'sha256:'+'b'*64, 'private_key')]:
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(layers.scan_file(io.BytesIO(value), policy=policy,
+                                 diff_id=diff_id, file_name=file), expected)
 
     def test_full_payload_fingerprints_distinguish_multiple_keys(self):
         raw = b'-----BEGIN PRIVATE KEY-----\n'+b'A'*64+b'\n-----END PRIVATE KEY-----\n'

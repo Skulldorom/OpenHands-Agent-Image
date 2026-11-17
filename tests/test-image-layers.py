@@ -35,7 +35,7 @@ def credential_classification(record, now, policy=None):
     policy = policy or json.loads(POLICY_PATH.read_text())
     if record["credential_rule"] == "private_key":
         for fixture in policy["public_private_keys"]:
-            if all(record.get(k) == fixture[k] for k in ("kind", "payload_sha256", "payload_length")):
+            if all(record.get(k) == fixture[k] for k in ("kind", "payload_sha256", "payload_length", "diff_id", "file")):
                 return {"classification": "public-cryptographic-test-material", **fixture}
     if (record["credential_rule"] == "github_token" and record.get("token_family") == "ghs_"
             and record.get("match_length") == 40 and record.get("standalone") is True):
@@ -61,8 +61,7 @@ def pem_material(raw, match):
     return {}, match.group() + rest[:65536]
 
 
-def credential_matches(raw, classified=None, final=True):
-    normalized = normalize(raw)
+def credential_matches(normalized, classified=None, final=True):
     for match in CREDENTIAL.finditer(normalized):
         if (not final and match.lastgroup != "private_key" and match.end() == len(normalized)
                 and len(match.group()) < 4096):
@@ -72,7 +71,7 @@ def credential_matches(raw, classified=None, final=True):
 
 
 def scan_file(source, credential_file=False, chunk_size=1024 * 1024, classified=None, detected=None,
-              diff_id=None, now=None, policy=None):
+              diff_id=None, now=None, policy=None, file_name=None):
     """Inspect every match; public material never exempts the containing file."""
     now = now or datetime.now(timezone.utc)
     tail = b""
@@ -88,7 +87,11 @@ def scan_file(source, credential_file=False, chunk_size=1024 * 1024, classified=
             first_rule = first_rule or "credential_file"
         raw = tail + chunk
         normalized = normalize(raw)
-        for match in credential_matches(raw, final=final):
+        raw_cursor = 0
+        for match in credential_matches(normalized, final=final):
+            raw_start = raw.find(match.group(), raw_cursor)
+            if raw_start >= 0:
+                raw_cursor = raw_start + len(match.group())
             material, value = pem_material(normalized, match) if match.lastgroup == "private_key" else ({}, match.group())
             # Retain a bounded incomplete PEM until its footer or EOF arrives.
             if (not final and match.lastgroup == "private_key" and not material
@@ -99,8 +102,8 @@ def scan_file(source, credential_file=False, chunk_size=1024 * 1024, classified=
                 continue
             reported.add((match.lastgroup, digest))
             record = {"credential_rule": match.lastgroup, "match_sha256": digest,
-                      "match_length": len(value), "diff_id": diff_id,
-                      "file_offset": source.tell() - len(raw) + match.start(),
+                      "match_length": len(value), "diff_id": diff_id, "file": file_name,
+                      "file_offset": source.tell() - len(raw) + raw_start if raw_start >= 0 else None,
                       "token_family": match.group()[:4].decode("ascii") if match.lastgroup.startswith("github") else None,
                       "standalone": not re.search(rb"[A-Za-z0-9_]$", normalized[:match.start()])
                           and not re.match(rb"[A-Za-z0-9_]", normalized[match.end():]), **material}
@@ -125,9 +128,7 @@ def scan_file(source, credential_file=False, chunk_size=1024 * 1024, classified=
         if final:
             return first_rule
         tail = raw[-65536:]
-        for candidate in CREDENTIAL.finditer(normalized):
-            if candidate.lastgroup != "private_key":
-                continue
+        for candidate in re.finditer(rb"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----", normalized):
             rest = normalized[candidate.end():]
             compact = re.sub(rb"[ \t\r\n]+", b" ", rest)
             partial = re.fullmatch(rb"[ \t\r\n]+(?:[A-Za-z0-9+/=][ \t\r\n]*){0,15}", rest)
@@ -184,7 +185,7 @@ def check_layers(stream, classified=None, policy=None, inspected=None):
                         file_classified = []
                         diff_id = "sha256:" + member.name.split("/")[-1] if member.name.startswith("blobs/sha256/") else None
                         rule = scan_file(layer.extractfile(entry), credential_file, classified=file_classified, detected=detected,
-                                         diff_id=diff_id, policy=policy)
+                                         diff_id=diff_id, policy=policy, file_name=name)
                         if classified is not None:
                             classified.extend(dict(row, file=name, archive_member=member.name) for row in file_classified)
                         if rule:

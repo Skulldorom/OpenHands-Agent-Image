@@ -87,6 +87,8 @@ def validate_layer_report(digest, now, prepared_at=None):
     for scan in (upstream, report):
         assert isinstance(scan["classifications"], list)
         for record in scan["classifications"]:
+            assert record["diff_id"] in scan["layer_diff_ids"], "Classification layer missing from inventory"
+            assert record["archive_member"] == "blobs/sha256/" + record["diff_id"].split(":")[1]
             assert module.credential_classification(record, now) == record["decision"], "Unknown credential classification"
 
 

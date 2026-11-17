@@ -12,7 +12,7 @@ The scanner compares exact upstream/candidate saved-layer inventories, verifies 
 
 ## Validation scope
 
-144 local Python regressions passed, including actual scanner/archive tests and publisher gates. Python/shell syntax and diff checks passed. Hosted policy/lint, Docker Git identity, PostgreSQL 17, Agent API/signals and exact retained-candidate security audit are rerun on the final source. See PR #1 for final hosted run URLs and results; local results do not substitute for hosted Docker validation.
+145 local Python regressions passed, including actual scanner/archive tests and publisher gates. Python/shell syntax and diff checks passed. Hosted policy/lint, Docker Git identity, PostgreSQL 17, Agent API/signals and exact retained-candidate security audit are rerun on the final source. See PR #1 for final hosted run URLs and results; local results do not substitute for hosted Docker validation.
 
 The full PR diff against main includes vulnerability reporting, release orchestration, provenance, CI and tests. The current credential changes preserve the vulnerability policy and publication conditions. Existing unsuppressed inventories remain historical evidence; current releases require fresh assessment.
 

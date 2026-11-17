@@ -119,10 +119,11 @@ class SafetyTests(unittest.TestCase):
                 policy = json.loads((root/'security/credential-policy.json').read_text())
                 fixture = policy['public_private_keys'][0]
                 row = dict(credential_rule='private_key', match_sha256='b'*64, match_length=200,
-                           diff_id='sha256:'+'a'*64, file_offset=0, token_family=None, standalone=True,
-                           file='usr/lib/library', archive_member='blobs/sha256/'+'a'*64,
+                           diff_id=fixture['diff_id'], file_offset=0, token_family=None, standalone=True,
+                           file=fixture['file'], archive_member='blobs/sha256/'+fixture['diff_id'].split(':')[1],
                            **{k: fixture[k] for k in ('kind', 'payload_sha256', 'payload_length')})
                 row['decision'] = dict(classification='public-cryptographic-test-material', **fixture)
+                report['layer_diff_ids'] = report['upstream']['layer_diff_ids'] = [fixture['diff_id']]
                 report['classifications'] = [row]
                 report['upstream']['classifications'] = [row]
                 spec = __import__('importlib.util', fromlist=['']).spec_from_file_location('layers_gate', root/'tests/test-image-layers.py')

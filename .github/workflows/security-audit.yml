@@ -46,6 +46,10 @@ jobs:
             --upstream-ref "ghcr.io/openhands/agent-server@$upstream" --report-only > security-summary.txt
           cat security-summary.txt
           cat security-summary.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Inspect every saved layer of the exact retained candidate
+        run: |
+          candidate=$(jq -r .candidate security/historical-evidence.json)
+          timeout 15m python3 tests/test-image-layers.py "$candidate"
       - name: Require exact-upstream custom security policy
         run: python3 -c 'import json; assert json.load(open("security-assessment.json"))["pass"], "Custom risk, emergency block or secrets prevent release"'
       - name: Group all HIGH and CRITICAL instances without suppressing findings
@@ -101,6 +105,7 @@ jobs:
             high-critical-inventory.json
             high-critical-inventory.md
             candidate-trivy.json
+            layer-classifications.json
             upstream-trivy.json
             upstream-digest.txt
             scanner-version.json

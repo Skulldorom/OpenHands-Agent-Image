@@ -44,6 +44,30 @@ jobs:
           python3 scripts/security-assessment.py --candidate candidate-trivy.json --upstream upstream-trivy.json \
             --policy security/policy.json --tracker debian-tracker.json --candidate-ref "$candidate" \
             --upstream-ref "ghcr.io/openhands/agent-server@$upstream" --report-only
+      - name: Group all HIGH and CRITICAL instances without suppressing findings
+        run: python3 scripts/group-security-inventory.py security-assessment.json
+      - name: Inspect compiled Go reachability without executing candidate tools
+        shell: bash
+        run: |
+          go version > go-inspection-toolchain.txt
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          govulncheck="$(go env GOPATH)/bin/govulncheck"
+          "$govulncheck" -version > govulncheck-version.txt
+          candidate=$(jq -r .candidate security/historical-evidence.json)
+          cid=$(docker create "$candidate")
+          trap 'docker rm "$cid" >/dev/null' EXIT
+          mkdir -p reachability
+          for path in usr/bin/gh usr/bin/rootlesskit usr/libexec/docker/cli-plugins/docker-buildx usr/libexec/docker/cli-plugins/docker-compose; do
+            name=${path##*/}
+            docker cp "$cid:/$path" "reachability/$name"
+            sha256sum "reachability/$name" > "reachability/$name.sha256"
+            go version -m "reachability/$name" > "reachability/$name.modules.txt"
+            status=0
+            "$govulncheck" -mode=binary -json "reachability/$name" > "reachability/$name.govulncheck.json" 2> "reachability/$name.govulncheck.stderr" || status=$?
+            printf '%s\n' "$status" > "reachability/$name.exit-code"
+            [[ "$status" == 0 || "$status" == 3 ]]
+            rm "reachability/$name"
+          done
       - name: Preserve unsuppressed audit evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -51,6 +75,11 @@ jobs:
           name: exact-candidate-security-${{ github.run_id }}
           retention-days: 90
           path: |
+            go-inspection-toolchain.txt
+            govulncheck-version.txt
+            reachability/
+            high-critical-inventory.json
+            high-critical-inventory.md
             candidate-trivy.json
             upstream-trivy.json
             upstream-digest.txt

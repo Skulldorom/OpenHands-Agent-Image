@@ -126,7 +126,7 @@ class GitHubRegistry:
         return [r for page in pages for r in page if re.fullmatch(r"v\d+\.\d+\.\d+", r["tag_name"])]
 
     def reserve(self, state):
-        body = release_notes(state) + "\n<!-- release-evidence:" + json.dumps(evidence_descriptor(evidence_archive()), sort_keys=True) + " -->"
+        body = release_notes(state, self.image) + "\n<!-- release-evidence:" + json.dumps(evidence_descriptor(evidence_archive()), sort_keys=True) + " -->"
         return json.loads(release.gh("api", "--method", "POST", f"repos/{self.repo}/releases",
             "-f", "tag_name=v" + state["version"], "-f", "target_commitish=" + state.get("release_source_commit", state["commit"]),
             "-f", "name=v" + state["version"], "-f", "body=" + body, "-F", "draft=true"))
@@ -222,9 +222,9 @@ class GitHubRegistry:
             release.gh("api", "--method", "PATCH", f"repos/{self.repo}/releases/{record['id']}",
                        "-F", "draft=false")
 
-def release_notes(state):
+def release_notes(state, image=None):
     assessment = json.loads(Path("security-assessment.json").read_text())
-    return (f"Validated image: `{release.IMAGE}@{state['image_digest']}`\n"
+    return (f"Validated image: `{image or release.IMAGE}@{state['image_digest']}`\n"
             f"Upstream: `ghcr.io/openhands/agent-server@{state['upstream_digest']}`\n"
             f"Agent Server: {state['agent_server_version']}. Previous immutable releases remain available for rollback.\n"
             f"Accepted findings (not suppressed): {json.dumps(assessment.get('accepted_exceptions', []))}. "

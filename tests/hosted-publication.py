@@ -125,7 +125,7 @@ def run(args):
     require(not any(t['name'].startswith('v') for t in pages(f'repos/{repo}/tags?per_page=100')), 'Existing version tags refused')
     commit = api(f"repos/{repo}/commits/" + urllib.parse.quote(metadata['default_branch'], safe=''))['sha']
     require(bool(re.fullmatch(r'[a-f0-9]{40}', commit)), 'Missing isolated repository commit')
-    user = api('user')['login']
+    user = os.environ.get('REGISTRY_USER') or api('user')['login']
     owner, package = image.removeprefix('ghcr.io/').split('/', 1)
     kind = 'orgs' if api('users/' + owner)['type'] == 'Organization' else 'users'
     package_api = f'{kind}/{owner}/packages/container/{package}'

@@ -126,6 +126,17 @@ class PlannerExecutionTests(unittest.TestCase):
         self.assertEqual(state['action'], 'validate')
         self.assertEqual(state['version'], '1.0.0')
 
+    def test_forced_build_runs_before_superseded_pending_release_blocks_publication(self):
+        self.published(draft=True)
+        self.base = 'sha256:' + 'c'*64
+        for event in ('push', 'workflow_dispatch'):
+            os.environ['GITHUB_EVENT_NAME'] = event
+            state, _ = self.run_plan()
+            self.assertEqual(state['action'], 'build')
+        os.environ['GITHUB_EVENT_NAME'] = 'schedule'
+        with self.assertRaisesRegex(AssertionError, 'superseded'):
+            self.run_plan()
+
     def test_policy_and_functional_changes_revalidate_same_image(self):
         self.published()
         for name in ('security/policy.json', 'scripts/validate-image.sh'):

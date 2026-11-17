@@ -3,6 +3,12 @@ on:
   schedule:
     - cron: '23 5 * * *'
   workflow_dispatch:
+    inputs:
+      bump:
+        description: Release increment; dispatch still requires every security gate
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
 permissions:
   contents: read
 jobs:
@@ -15,4 +21,4 @@ jobs:
       attestations: write
     uses: ./.github/workflows/release.yml
     with:
-      bump: auto
+      bump: ${{ inputs.bump || 'auto' }}

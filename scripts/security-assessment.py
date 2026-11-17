@@ -30,7 +30,7 @@ def scope(result):
 
 
 def identity(result, vulnerability):
-    return scope(result), result.get('Class'), result.get('Type'), *key(vulnerability)
+    return scope(result), result.get('Class'), result.get('Type'), *key(vulnerability), vulnerability.get('PkgPath', '')
 
 
 def exact_identity(result, vulnerability):
@@ -68,7 +68,6 @@ def validate_scan(report, expected):
     assert not report.get('Errors') and not report.get('Error'), 'Scanner errors present'
     assert isinstance(report.get('Results'), list) and report['Results'], 'Empty scan'
     assert any(r.get('Class') == 'os-pkgs' and r.get('Type') == 'debian' and r.get('Packages') for r in report['Results']), 'Missing OS inventory'
-    seen = set()
     for result in report['Results']:
         assert isinstance(result.get('Target'), str) and result['Target']
         assert not result.get('Misconfigurations') and not result.get('MisconfSummary'), 'Unexpected scan format'
@@ -82,10 +81,6 @@ def validate_scan(report, expected):
             for field in ('PkgName', 'VulnerabilityID', 'InstalledVersion', 'Severity'):
                 assert isinstance(vulnerability.get(field), str) and vulnerability[field], 'Malformed vulnerability'
             assert vulnerability['Severity'] in SEVERITIES, 'Unsupported severity'
-            # Duplicate identities would otherwise hide an additional affected target.
-            exact = exact_identity(result, vulnerability)
-            assert exact not in seen, 'Ambiguous duplicate vulnerability'
-            seen.add(exact)
         for secret in result.get('Secrets', []):
             assert isinstance(secret, dict) and secret.get('RuleID'), 'Malformed secret finding'
 
@@ -95,6 +90,7 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
     validate_scan(candidate, expected_candidate)
     validate_scan(upstream, expected_upstream)
     old = defaultdict(list)
+    available = Counter(exact_identity(r, v) for r, _, v in findings(upstream))
     for result, _, vulnerability in findings(upstream):
         old[identity(result, vulnerability)].append(vulnerability)
     upstream_packages = {(scope(r), r.get('Class'), r.get('Type'), p['Name'])
@@ -105,8 +101,11 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
         alternatives = old.get(identity(result, vulnerability), [])
         same_version = [v for v in alternatives if v['InstalledVersion'] == vulnerability['InstalledVersion']]
         severity = vulnerability['Severity']
-        if any(v['Severity'] == severity for v in same_version):
+        if available[exact_identity(result, vulnerability)] > 0:
             comparison = 'inherited unchanged'
+            available[exact_identity(result, vulnerability)] -= 1
+        elif any(v['Severity'] == severity for v in same_version):
+            comparison = 'introduced'
         elif same_version and SEVERITIES[severity] <= max(SEVERITIES[v['Severity']] for v in same_version):
             comparison = 'improved'
         elif alternatives:
@@ -127,16 +126,22 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
         rows.append({'package': vulnerability['PkgName'], 'source_package': source, 'metadata_sha256': metadata_hash(vulnerability),
                      'cve': vulnerability['VulnerabilityID'], 'severity': severity, 'installed': vulnerability['InstalledVersion'],
                      'fixed': vulnerability.get('FixedVersion', ''), 'status': vulnerability.get('Status', 'unknown'),
-                     'target': result['Target'], 'comparison_target': scope(result), 'result_class': result.get('Class'), 'result_type': result.get('Type'),
+                     'target': result['Target'], 'package_path': vulnerability.get('PkgPath', ''), 'comparison_target': scope(result), 'result_class': result.get('Class'), 'result_type': result.get('Type'),
                      'comparison': comparison, 'origin': origin, 'upstream_installed': sorted({v['InstalledVersion'] for v in alternatives}),
                      'vendor_trixie': vendor.get('releases', {}).get('trixie', {}), 'vendor_scope': vendor.get('scope', 'unknown'),
                      'title': vulnerability.get('Title', ''), 'description': vulnerability.get('Description', ''),
                      'references': vulnerability.get('References', []), 'cvss': vulnerability.get('CVSS', {}),
                      'blocking_reasons': reasons, 'exposure': 'Potentially reachable in arbitrary agent workloads; inherited does not mean harmless.'})
-    candidate_exact = {exact_identity(r, v) for r, _, v in findings(candidate)}
-    removed = [{'target': scope(r), 'result_class': r.get('Class'), 'result_type': r.get('Type'),
-                'package': v['PkgName'], 'cve': v['VulnerabilityID'], 'installed': v['InstalledVersion'], 'severity': v['Severity']}
-               for r, _, v in findings(upstream) if exact_identity(r, v) not in candidate_exact]
+    candidate_exact = Counter(exact_identity(r, v) for r, _, v in findings(candidate))
+    missing = Counter(exact_identity(r, v) for r, _, v in findings(upstream)) - candidate_exact
+    removed = []
+    for r, _, v in findings(upstream):
+        exact = exact_identity(r, v)
+        if missing[exact] <= 0:
+            continue
+        missing[exact] -= 1
+        removed.append({'target': scope(r), 'package_path': v.get('PkgPath', ''), 'result_class': r.get('Class'), 'result_type': r.get('Type'),
+                        'package': v['PkgName'], 'cve': v['VulnerabilityID'], 'installed': v['InstalledVersion'], 'severity': v['Severity']})
     secrets = [dict(image=report['ArtifactName'], target=result['Target'], rule=secret['RuleID'], title=secret.get('Title'))
                for report in (candidate, upstream) for result in report['Results'] for secret in result.get('Secrets', [])]
     introduced = [r for r in rows if r['comparison'] == 'introduced' and r['severity'] in policy['block_severities']]
@@ -145,9 +150,14 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
     if baseline is not None and baseline.get('upstream') is not None:
         assert previous_upstream is not None, 'Previous approved upstream scan missing'
         validate_scan(previous_upstream, baseline['upstream'])
-        previous = {exact_identity(r, v) for r, _, v in findings(previous_upstream)}
-        new_upstream = [{'target': scope(r), 'package': v['PkgName'], 'cve': v['VulnerabilityID'], 'installed': v['InstalledVersion'], 'severity': v['Severity']}
-                        for r, _, v in findings(upstream) if exact_identity(r, v) not in previous]
+        previous = Counter(exact_identity(r, v) for r, _, v in findings(previous_upstream))
+        added = Counter(exact_identity(r, v) for r, _, v in findings(upstream)) - previous
+        new_upstream = []
+        for r, _, v in findings(upstream):
+            exact = exact_identity(r, v)
+            if added[exact] > 0:
+                added[exact] -= 1
+                new_upstream.append({'target': scope(r), 'package_path': v.get('PkgPath', ''), 'package': v['PkgName'], 'cve': v['VulnerabilityID'], 'installed': v['InstalledVersion'], 'severity': v['Severity']})
     else:
         assert previous_upstream is None, 'Unbound previous upstream scan'
     blockers = [r for r in rows if r['blocking_reasons']]

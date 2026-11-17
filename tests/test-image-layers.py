@@ -23,6 +23,33 @@ def credential_matches(raw):
             yield match
 
 
+def scan_file(source, credential_file=False, chunk_size=1024 * 1024):
+    """Inspect all bytes with bounded memory, retaining cross-chunk key prefixes."""
+    tail = b""
+    while True:
+        chunk = source.read(chunk_size)
+        if not chunk:
+            return None
+        if credential_file and chunk.strip():
+            return "credential_file"
+        raw = tail + chunk
+        match = next(credential_matches(raw), None)
+        if match:
+            return match.lastgroup
+        tail = raw[-4096:]
+        normalized = raw.replace(b"\\r", b"\r").replace(b"\\n", b"\n")
+        for candidate in CREDENTIAL.finditer(normalized):
+            if candidate.lastgroup != "private_key":
+                continue
+            rest = normalized[candidate.end():]
+            compact = re.sub(rb"[ \t\r\n]+", b" ", rest)
+            # Hold even arbitrarily padded/wrapped incomplete PEM payloads;
+            # collapsing only payload whitespace keeps memory bounded.
+            partial = re.fullmatch(rb"[ \t\r\n]+(?:[A-Za-z0-9+/=][ \t\r\n]*){0,15}", rest)
+            if partial or (compact.startswith(b" ") and b"Proc-Type: 4,ENCRYPTED".startswith(compact[1:])):
+                tail = candidate.group() + compact
+
+
 def check_layers(stream):
     count = 0
     with tarfile.open(fileobj=stream, mode="r|") as archive:
@@ -38,18 +65,18 @@ def check_layers(stream):
             count += 1
             with layer:
                 for entry in layer:
-                    name = entry.name.lstrip("./")
+                    name = entry.name.lstrip("/")
+                    while name.startswith("./"):
+                        name = name[2:]
                     if name in {"etc/ssl/private/ssl-cert-snakeoil.key", "etc/ssl/certs/ssl-cert-snakeoil.pem"}:
                         raise AssertionError(f"Snakeoil material recoverable in layer {count}: {name}")
-                    if entry.isfile() and name.endswith(("/.git-credentials", "/.ssh/id_rsa", "/.ssh/id_ed25519", "/.aws/credentials", "/.docker/config.json", "/.env")):
-                        source = layer.extractfile(entry)
-                        raw = source.read(1024 * 1024)
-                        assert not raw.strip(), f"Credential file recoverable in layer {count}: {name}"
-                    elif entry.isfile() and entry.size <= 1024 * 1024 and name.startswith(("home/", "root/", "tmp/", "run/")):
-                        raw = layer.extractfile(entry).read()
-                        for match in credential_matches(raw):
+                    if entry.isfile():
+                        protected = ("/.git-credentials", "/.ssh/id_rsa", "/.ssh/id_ed25519", "/.aws/credentials", "/.docker/config.json", "/.env")
+                        credential_file = any(name == suffix.lstrip("/") or name.endswith(suffix) for suffix in protected)
+                        rule = scan_file(layer.extractfile(entry), credential_file)
+                        if rule:
                             # Rule and location only; never matched bytes or context.
-                            raise AssertionError(f"Credential pattern recoverable in layer {count}: {name}; rule={match.lastgroup}; archive_member={member.name}")
+                            raise AssertionError(f"Credential pattern recoverable in layer {count}: {name}; rule={rule}; archive_member={member.name}")
     assert count, "No Docker archive layers inspected"
     return count
 

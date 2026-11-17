@@ -72,6 +72,26 @@ class LayerTests(unittest.TestCase):
             layers.check_layers(io.BytesIO(archive({'old/layer.tar': archive({'tmp/cache': b'\x00' + value + b'\xff'})})))
         self.assertNotIn(value.decode('ascii'), str(caught.exception))
 
+    def test_large_files_outside_home_and_chunk_boundaries_are_scanned(self):
+        token = b'ghp_' + b'Z'*36
+        for name in ('usr/lib/binary', 'opt/app/data', 'var/cache/file', 'etc/application.conf'):
+            for offset in (1024*1024-8, 2*1024*1024):
+                raw = b'x'*offset + b'\x00' + token
+                with self.subTest(name=name, offset=offset), self.assertRaisesRegex(AssertionError, 'rule=github_token') as caught:
+                    layers.check_layers(io.BytesIO(archive({'old/layer.tar': archive({name: raw})})))
+                self.assertNotIn(token.decode(), str(caught.exception))
+
+    def test_streaming_pem_keeps_arbitrary_whitespace_and_wrapped_material(self):
+        header = b'-----BEGIN PRIVATE KEY-----'
+        for payload in (b' '*20000 + b'A'*16, (b' '*2000+b'A')*16, b'\\n' + b'A'*64):
+            self.assertEqual(layers.scan_file(io.BytesIO(header+payload), chunk_size=11), 'private_key')
+
+    def test_root_credential_file_and_long_whitespace_prefix_block(self):
+        for name in ('.env', '.git-credentials', '.aws/credentials'):
+            raw = b' '*(1024*1024+1) + b'password=value'
+            with self.assertRaisesRegex(AssertionError, 'credential_file'):
+                layers.check_layers(io.BytesIO(archive({'old/layer.tar': archive({name: raw})})))
+
     def test_all_matches_checked_after_harmless_literal(self):
         raw = b'\x00-----BEGIN PRIVATE KEY-----\x00' + b'ghp_' + b'Z' * 36
         with self.assertRaisesRegex(AssertionError, 'rule=github_token'):

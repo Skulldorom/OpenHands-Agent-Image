@@ -211,13 +211,28 @@ class AssessmentTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.run_assessment()
 
-    def test_invalid_severity_or_duplicate_findings_fail(self):
+    def test_invalid_severity_fails(self):
         self.candidate['Results'][0]['Vulnerabilities'] = [self.vulnerability('unsupported')]
         with self.assertRaises(AssertionError):
             self.run_assessment()
-        self.candidate['Results'][0]['Vulnerabilities'] = [self.vulnerability()]*2
-        with self.assertRaises(AssertionError):
-            self.run_assessment()
+
+    def test_duplicate_scan_instances_compare_counts_without_suppression(self):
+        self.inherit()
+        for report in (self.base, self.candidate):
+            report['Results'][0]['Vulnerabilities'] *= 2
+        r = self.run_assessment()
+        self.assertTrue(r['pass'])
+        self.assertEqual(r['comparison_counts']['inherited unchanged'], 2)
+        self.candidate['Results'][0]['Vulnerabilities'].append(self.vulnerability())
+        r = self.run_assessment()
+        self.assertFalse(r['pass'])
+        self.assertEqual(len(r['introduced_high_critical']), 1)
+
+    def test_additional_package_installation_path_is_added_risk(self):
+        self.inherit()
+        self.base['Results'][0]['Vulnerabilities'][0]['PkgPath'] = 'original'
+        self.candidate['Results'][0]['Vulnerabilities'][0]['PkgPath'] = 'added'
+        self.assertFalse(self.run_assessment()['pass'])
 
     def test_old_acceptance_policy_cannot_reenable_exceptions(self):
         self.policy['exceptions'] = [{}]

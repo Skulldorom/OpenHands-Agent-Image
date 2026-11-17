@@ -28,6 +28,7 @@ jobs:
           python3 tests/test-blocker-explain.py
           python3 tests/test-release-evidence.py
           python3 tests/test-release-planning.py
+          python3 tests/test-publication.py
           python3 tests/test-provenance.py
           python3 tests/test-automation-safety.py
           python3 tests/test-workflow-policy.py
@@ -50,6 +51,22 @@ jobs:
           path: |
             active-policy.json
             active-policy.md
-            hypothetical-approval.json
-            hypothetical-approval.md
             proposal-validation.json
+  integration:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Build local validation image only
+        run: docker build --tag local-pr-validation .
+      - name: Real Git PostgreSQL API and signals
+        run: scripts/validate-image.sh local-pr-validation
+      - name: Inspect layers for credentials
+        run: timeout 15m python3 tests/test-image-layers.py local-pr-validation

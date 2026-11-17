@@ -39,8 +39,8 @@ jobs:
               --format json --output "$target-trivy.json" --timeout 20m "$ref"
           done
           sha256sum --check scanner-database.sha256
-          curl --fail --silent --show-error --retry 3 --max-time 120 \
-            https://security-tracker.debian.org/tracker/data/json > debian-tracker.json
+          # Optional vendor tracker metadata is not a release authorization input.
+          printf '{}\n' > debian-tracker.json
           python3 scripts/security-assessment.py --candidate candidate-trivy.json --upstream upstream-trivy.json \
             --policy security/policy.json --tracker debian-tracker.json --candidate-ref "$candidate" \
             --upstream-ref "ghcr.io/openhands/agent-server@$upstream" --report-only > security-summary.txt

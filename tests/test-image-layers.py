@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Inspect every saved layer, including files hidden by later whiteouts."""
 import re
+import hashlib
 import json
 import subprocess
 import sys
@@ -35,6 +36,11 @@ def scan_file(source, credential_file=False, chunk_size=1024 * 1024):
         raw = tail + chunk
         match = next(credential_matches(raw), None)
         if match:
+            # Classification metadata only. Never print matched content/context.
+            print(json.dumps({"credential_rule": match.lastgroup,
+                              "match_sha256": hashlib.sha256(match.group()).hexdigest(),
+                              "match_length": len(match.group()),
+                              "documented_aws_example": match.group() == b"AKIAIOSFODNN7EXAMPLE"}))
             return match.lastgroup
         tail = raw[-4096:]
         normalized = raw.replace(b"\\r", b"\r").replace(b"\\n", b"\n")

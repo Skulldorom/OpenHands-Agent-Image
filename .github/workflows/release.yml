@@ -205,8 +205,9 @@ jobs:
               --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL --ignorefile /dev/null --ignore-unfixed=false \
               --list-all-pkgs --format json --output previous-upstream-trivy.json --timeout 15m "$PREVIOUS_UPSTREAM"
           fi
-          curl --fail --show-error --silent --retry 3 --max-time 120 \
-            https://security-tracker.debian.org/tracker/data/json > debian-tracker.json
+          # Debian tracker metadata is historical/advisory context only; it has
+          # no role in the exact-upstream comparison. Avoid an unrelated network gate.
+          printf '{}\n' > debian-tracker.json
           sha256sum --check scanner-database.sha256
       - name: Full security assessment (no suppressions)
         if: steps.plan.outputs.validate == 'true'

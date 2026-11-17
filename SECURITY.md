@@ -1,6 +1,6 @@
 # Security and release policy
 
-Current work: [credential-layer investigation](security/CREDENTIAL-LAYER-INVESTIGATION.md), [complete grouped HIGH/CRITICAL inventory](security/HIGH-CRITICAL.md), [prioritized reachability assessment](security/PRIORITY-ASSESSMENT.md), and [isolated publication test setup](security/PUBLICATION-TEST-SETUP.md). The Node-cache marker was a false positive; real PEM payloads and tokens remain blocking. Hosted publication is still unverified and the fresh security assessment still blocks 530 instances. The Compose 5.7.1 binary evidence is explicitly superseded by release 5.7.2; remediation remains undetermined because current binary integrity verification has not passed.
+Current work: [credential-layer investigation](security/CREDENTIAL-LAYER-INVESTIGATION.md), [complete grouped HIGH/CRITICAL inventory](security/HIGH-CRITICAL.md), [prioritized reachability assessment](security/PRIORITY-ASSESSMENT.md), and [isolated publication test setup](security/PUBLICATION-TEST-SETUP.md). The Node-cache marker was a false positive; real PEM payloads and tokens remain blocking. Hosted publication is still unverified and the fresh security assessment still blocks 530 instances. Compose 5.7.2 now passes [official checksum and binary verification](security/COMPOSE-VERIFICATION.md); the earlier failure was missing redirect handling. Its embedded x/net v0.60.0 remains affected, so this resolves the evidence failure without clearing the vulnerability or upgrading the candidate image.
 
 ## Mandatory gates
 
@@ -108,16 +108,15 @@ containing `[publication-integration-only]`. It uses a unique package under
 `integration-latest-UUID` alias. A non-deployable, zero-layer OCI fixture exercises
 the real publisher; it is **not** security authorization for a deployable image.
 
-Configure `PUBLICATION_INTEGRATION_TOKEN` in the protected
-`publication-integration` environment with repository contents and GHCR package
-read/write permissions; optional cleanup also needs package-version deletion.
-The currently available token reports `read:org, read:user, repo, workflow`, not
-package scopes, and no isolated repository was found. Real publication therefore
-remains unverified. The dispatch-only workflow intentionally runs on `main` only;
-before merge a maintainer may execute the harness from the audited PR checkout
-on a separate Docker-enabled runner with the same isolation requirements. Do
-not grant the PR production release credentials or change its trigger to obtain
-this test.
+Use only the sandbox repository's scoped `GITHUB_TOKEN`, with job-level
+`contents: write` and `packages: write`. No PAT or repository secret is required.
+Copy the five files listed in [the minimal setup](security/PUBLICATION-TEST-SETUP.md)
+to that dedicated repository's `main`; no production workflow is needed. The
+sandbox Environment can be unprotected and empty, and GitHub creates it when
+referenced if it does not exist, subject to account policy. Source-repository
+runs are excluded by repository/input guards; test packages link to the sandbox.
+No production `latest` tag is used. Actual hosted publication remains unverified
+until that sandbox is created and the harness passes there.
 
 The harness interrupts after assets persist, retries twice, checks unchanged
 asset IDs/bytes and original release body, appends a distinct reassessment,
@@ -147,18 +146,12 @@ binary. All 530 HIGH/CRITICAL instances block. This supersedes historical counts
 not the original approval evidence. The scan workflow succeeded in collecting
 evidence; the **security gate did not pass**.
 
-Separately, run
-https://github.com/Skulldorom/OpenHands-Agent-Image/actions/runs/44052745007
-passed policy/regressions and Docker functional checks (Git identity, PostgreSQL
-17 initialization/query/backup/restore, Agent Server API/readiness/signals), but
-**failed** image-layer inspection: a credential-like pattern was found in layer 7
-at `tmp/node-compile-cache/v24.22.2-x64-964aae3f-0/0c92995d`.
-This has not been classified as a real credential or a false positive. No matched
-value is disclosed here. Trivy detecting zero secrets does not clear this separate
-finding. Keep the layer check blocking; privately inspect the exact matched bytes
-and provenance before deciding whether upstream remediation or a narrowly
-justified detector correction is appropriate. Do not merely delete the file in a
-later layer: earlier bytes remain recoverable. Merge readiness is blocked by this
-unresolved check; release eligibility is independently blocked by the security
-baseline. The isolated hosted publisher remains unverified for the prerequisites
-above. No production release or live LXC change occurred.
+The earlier layer failure in run `44052745007` has been resolved: the Node cache
+contained a PEM format-boundary constant, not key material. The corrected detector
+and regressions passed hosted upstream/candidate saved-layer inspection in run
+`44084622927`; current work reruns these checks against its final SHA. See
+[the investigation](security/CREDENTIAL-LAYER-INVESTIGATION.md) for exact rule and
+upstream-layer provenance. No binary-cache or directory exclusion was added.
+Merge readiness still requires the requested external sandbox publication test;
+production release eligibility is independently blocked by the security baseline.
+No production release or live LXC change occurred.

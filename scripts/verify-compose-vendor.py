@@ -28,7 +28,7 @@ def fetch(url, destination, *, minimum, maximum, follow=True, allow_http=False):
     destination = Path(destination)
     destination.unlink(missing_ok=True)
     protocols = '=http,https' if allow_http else '=https'
-    args = ['curl', '--fail', '--silent', '--show-error', '--proto', protocols,
+    args = ['curl', '--disable', '--fail', '--silent', '--show-error', '--proto', protocols,
             '--proto-redir', protocols, '--max-redirs', '5', '--retry', '3', '--retry-delay', '1',
             '--retry-max-time', '90', '--connect-timeout', '10', '--max-time', '120',
             '--max-filesize', str(maximum), '--output', str(destination), '--write-out', '%{json}']
@@ -119,7 +119,11 @@ def main():
         raise VerificationError(report['error']) from None
     finally:
         (output / 'vendor-compose-5.7.2-verification.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
-        print(json.dumps(report, sort_keys=True))
+        summary = dict(report)
+        if 'modules' in summary:
+            summary['modules'] = {name: version for name, version in summary['modules'].items()
+                                  if name in {'github.com/docker/compose/v5', 'golang.org/x/net', 'github.com/moby/go-archive'}}
+        print(json.dumps(summary, sort_keys=True))
 
 
 if __name__ == '__main__':

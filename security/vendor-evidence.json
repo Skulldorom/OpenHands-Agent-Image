@@ -1,6 +1,6 @@
 {
   "checked": "2026-11-17",
-  "method": "2026-11-16 read-only binary inspections plus 2026-11-17 latest-release metadata review. Compose 5.7.1 is superseded by 5.7.2; current binary verification is unresolved. See security/PRIORITY-ASSESSMENT.md.",
+  "method": "2026-11-16 retained binary inspections plus 2026-11-17 latest-release review and verified Compose 5.7.2 official artifact inspection. Both binary and separate checksum-asset pins matched after one HTTPS redirect. See security/COMPOSE-VERIFICATION.md.",
   "artifacts": [
     {
       "package": "gh",
@@ -23,14 +23,18 @@
     {
       "package": "docker-compose-plugin",
       "target": "usr/libexec/docker/cli-plugins/docker-compose",
-      "release": "v5.7.1",
-      "url": "https://github.com/docker/compose/releases/tag/v5.7.1",
+      "release": "v5.7.2",
+      "url": "https://github.com/docker/compose/releases/tag/v5.7.2",
       "modules": {
         "golang.org/x/net": "v0.60.0",
         "github.com/moby/go-archive": "v0.3.3"
       },
       "latest_release": "v5.7.2",
-      "verification_status": "superseded; newest binary checksum verification failed"
+      "verification_status": "verified official binary and independent pinned checksum asset",
+      "binary_sha256": "e14235d9c622c5bd57eb8adeed4a0f7308c7f3862e6812dd843f6fe27f1307cc",
+      "checksum_asset_sha256": "abb9bb05c9726d7b7abf138dde6c3058a64ffc7c05b344700a54dd6e7dc58089",
+      "binary_size": 34063021,
+      "evidence_run": "https://github.com/Skulldorom/OpenHands-Agent-Image/actions/runs/44096333206"
     },
     {
       "package": "docker-buildx-plugin",

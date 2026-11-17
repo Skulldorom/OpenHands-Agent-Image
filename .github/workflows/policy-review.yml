@@ -73,11 +73,6 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
-      - name: Inspect every upstream layer for credentials
-        run: |
-          upstream=$(sed -n 's/^ARG UPSTREAM_IMAGE=//p' Dockerfile)
-          docker pull "$upstream"
-          timeout 15m python3 tests/test-image-layers.py "$upstream"
       - name: Build local validation image only
         run: docker build --tag local-pr-validation .
       - name: Real Git PostgreSQL API and signals
@@ -98,4 +93,17 @@ jobs:
           print("Upstream diff IDs: " + json.dumps(base))
           print(f"Verified upstream layer prefix: {len(base)} of {len(candidate)} layers; exact upstream prefix verified")
           PYCODE
-          timeout 15m python3 tests/test-image-layers.py local-pr-validation
+          status=0
+          timeout 15m python3 tests/test-image-layers.py "$upstream" || status=$?
+          if [[ -f layer-classifications.json ]]; then mv layer-classifications.json upstream-layer-report.json; fi
+          timeout 15m python3 tests/test-image-layers.py local-pr-validation || status=$?
+          if [[ -f layer-classifications.json ]]; then mv layer-classifications.json candidate-layer-report.json; fi
+          exit "$status"
+      - name: Preserve complete credential layer inventories
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: credential-layer-inventory
+          path: |
+            upstream-layer-report.json
+            candidate-layer-report.json

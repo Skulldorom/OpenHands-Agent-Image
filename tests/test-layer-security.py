@@ -98,7 +98,7 @@ class LayerTests(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, 'credential_file'):
                 layers.check_layers(io.BytesIO(archive({'old/layer.tar': archive({name: raw})})))
 
-    def test_elf_diagnostics_work_on_streams_and_do_not_exempt_code_sections(self):
+    def test_executable_sections_remain_subject_to_credential_scanning(self):
         table = 2*1024*1024
         header = bytearray(64)
         header[:6] = b'\x7fELF\x02\x01'
@@ -111,7 +111,7 @@ class LayerTests(unittest.TestCase):
         with redirect_stdout(output), self.assertRaisesRegex(AssertionError, 'rule=aws_access_key'):
             layers.check_layers(io.BytesIO(archive({'old/layer.tar': archive({'usr/bin/node': payload})})))
         record = json.loads(output.getvalue())
-        self.assertTrue(record['elf_scope']['executable_section'])
+        self.assertEqual(record['credential_rule'], 'aws_access_key')
         self.assertEqual(record['file_offset'], 128)
 
     def test_aws_id_substrings_are_classified_but_standalone_ids_block(self):
@@ -148,6 +148,14 @@ class LayerTests(unittest.TestCase):
         with patch.object(layers, 'NONLIVE_INSTALLATION_LITERAL_SHA256', digest), redirect_stdout(io.StringIO()):
             self.assertEqual(layers.scan_file(io.BytesIO(fixture + b'\x00ghp_' + b'Z'*36), classified=records), 'github_token')
         self.assertEqual(len(records), 1)
+
+    def test_complete_inventory_still_fails_and_reports_all_affected_files(self):
+        files = {'opt/first': b'ghp_' + b'A2'*18, 'usr/lib/second': b'github_pat_' + b'B_'*30}
+        with redirect_stdout(io.StringIO()), self.assertRaises(layers.CredentialFindings) as caught:
+            layers.check_layers(io.BytesIO(archive({'old/layer.tar': archive(files)})))
+        self.assertEqual({r['file'] for r in caught.exception.findings}, set(files))
+        self.assertIn('rule=github_token', str(caught.exception))
+        self.assertIn('rule=github_pat', str(caught.exception))
 
     def test_all_matches_checked_after_harmless_literal(self):
         raw = b'\x00-----BEGIN PRIVATE KEY-----\x00' + b'ghp_' + b'Z' * 36

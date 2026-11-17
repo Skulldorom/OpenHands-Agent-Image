@@ -93,6 +93,32 @@ class WorkflowPolicyTests(unittest.TestCase):
                 result = subprocess.run(['bash', '-e', '-c', step['run']], cwd=directory, capture_output=True, text=True)
                 self.assertEqual(result.returncode == 0, accepted)
 
+
+    def test_actual_dual_layer_step_collects_both_failures_and_stays_blocking(self):
+        workflow = yaml.safe_load(Path('.github/workflows/policy-review.yml').read_text())
+        step = next(s for s in workflow['jobs']['integration']['steps'] if s.get('name') == 'Inspect layers for credentials')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fakebin = root / 'bin'
+            fakebin.mkdir()
+            (root/'Dockerfile').write_text('ARG UPSTREAM_IMAGE=upstream-fixture\\n')
+            commands = {
+                'docker': '#!/bin/sh\\nexit 0\\n',
+                'python3': '#!/bin/sh\\nif [ "$1" = tests/test-image-layers.py ]; then echo "$2" >> "$CALLS"; if [ "$2" = local-pr-validation ]; then exit "$CANDIDATE_FAIL"; else exit "$UPSTREAM_FAIL"; fi; fi\\nexit 0\\n',
+            }
+            for name, body in commands.items():
+                path = fakebin/name
+                path.write_text(body)
+                path.chmod(0o755)
+            for upstream, candidate in [(0,0), (23,0), (0,29), (23,29)]:
+                calls = root/'calls'
+                calls.write_text('')
+                env = dict(os.environ, PATH=str(fakebin)+':'+os.environ['PATH'], CALLS=str(calls),
+                           UPSTREAM_FAIL=str(upstream), CANDIDATE_FAIL=str(candidate))
+                result = subprocess.run(['bash', '-e', '-c', step['run']], cwd=root, env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, upstream == candidate == 0)
+                self.assertEqual(calls.read_text().splitlines(), ['upstream-fixture', 'local-pr-validation'])
+
     def test_automatic_publisher_is_gated_and_never_rebuilds(self):
         workflow = yaml.safe_load(Path('.github/workflows/release.yml').read_text())
         publisher = workflow['jobs']['publish']

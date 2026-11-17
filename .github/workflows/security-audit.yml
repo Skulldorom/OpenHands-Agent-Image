@@ -68,6 +68,27 @@ jobs:
             [[ "$status" == 0 || "$status" == 3 ]]
             rm "reachability/$name"
           done
+      - name: Record OS package and XML consumer reachability in isolated container
+        shell: bash
+        run: |
+          candidate=$(jq -r .candidate security/historical-evidence.json)
+          docker run --rm --read-only --network none --cap-drop ALL --security-opt no-new-privileges \
+            --entrypoint /bin/sh "$candidate" -s > os-reachability.txt <<'SH'
+          set -eu
+          dpkg-query -W libxml2 linux-libc-dev chromium
+          dpkg-query -L linux-libc-dev
+          ldd /usr/lib/chromium/chromium
+          if command -v dockerd; then printf '%s\n' 'A daemon binary exists; review required'; fi
+          SH
+      - name: Inspect newly released Compose vendor artifact without running it
+        shell: bash
+        run: |
+          curl --fail --silent --show-error --retry 3 --max-time 120 \
+            https://github.com/docker/compose/releases/download/v5.7.2/docker-compose-linux-x86_64 \
+            --output /tmp/vendor-compose-5.7.2
+          printf '%s  %s\n' e14235d9c622c5bd57eb8adeed4a0f7308c7f3862e6812dd843f6fe27f1307cc /tmp/vendor-compose-5.7.2 | sha256sum --check
+          go version -m /tmp/vendor-compose-5.7.2 > reachability/vendor-compose-5.7.2.modules.txt
+          rm /tmp/vendor-compose-5.7.2
       - name: Preserve unsuppressed audit evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -75,6 +96,7 @@ jobs:
           name: exact-candidate-security-${{ github.run_id }}
           retention-days: 90
           path: |
+            os-reachability.txt
             go-inspection-toolchain.txt
             govulncheck-version.txt
             reachability/

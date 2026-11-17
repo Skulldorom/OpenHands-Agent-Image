@@ -3,6 +3,7 @@
 import importlib.util
 import io
 import tarfile
+import subprocess
 import unittest
 
 spec = importlib.util.spec_from_file_location('layers', 'tests/test-image-layers.py')
@@ -62,6 +63,14 @@ class LayerTests(unittest.TestCase):
                         layers.check_layers(io.BytesIO(archive({'old/layer.tar': archive({
                             prefix + 'binary': b'\x00\xff' + value + b'\x00\x80'})})))
                     self.assertNotIn(value.decode('ascii'), str(caught.exception))
+
+    def test_generated_valid_private_key_is_blocked_in_binary(self):
+        # Ephemeral test-only key stays in memory; never logged or uploaded.
+        value = subprocess.check_output(['openssl', 'genpkey', '-algorithm', 'EC',
+                                         '-pkeyopt', 'ec_paramgen_curve:prime256v1'], stderr=subprocess.DEVNULL)
+        with self.assertRaisesRegex(AssertionError, 'rule=private_key') as caught:
+            layers.check_layers(io.BytesIO(archive({'old/layer.tar': archive({'tmp/cache': b'\x00' + value + b'\xff'})})))
+        self.assertNotIn(value.decode('ascii'), str(caught.exception))
 
     def test_all_matches_checked_after_harmless_literal(self):
         raw = b'\x00-----BEGIN PRIVATE KEY-----\x00' + b'ghp_' + b'Z' * 36

@@ -123,6 +123,12 @@ class LayerTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(layers.scan_file(io.BytesIO(raw), chunk_size=11), 'aws_access_key')
 
+    def test_stateless_github_installation_tokens_remain_blocking(self):
+        # GitHub's 2026 ghs_APPID_JWT format; synthetic, never usable.
+        value = b'ghs_1234567_' + b'eyJ'*40 + b'.' + b'A_'*80 + b'.' + b'B-'*40
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(layers.scan_file(io.BytesIO(value), chunk_size=17), 'github_installation')
+
     def test_all_matches_checked_after_harmless_literal(self):
         raw = b'\x00-----BEGIN PRIVATE KEY-----\x00' + b'ghp_' + b'Z' * 36
         with self.assertRaisesRegex(AssertionError, 'rule=github_token'):

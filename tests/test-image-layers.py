@@ -9,7 +9,7 @@ import sys
 import tarfile
 
 
-CREDENTIAL = re.compile(rb"(?P<private_key>-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----)|(?P<github_token>gh[pousr]_[A-Za-z0-9]{36,})|(?P<github_pat>github_pat_[A-Za-z0-9_]{50,})|(?P<aws_access_key>(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![A-Za-z0-9]))")
+CREDENTIAL = re.compile(rb"(?P<private_key>-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----)|(?P<github_installation>ghs_[A-Za-z0-9]+_[A-Za-z0-9_.-]{36,})|(?P<github_token>gh[pousr]_[A-Za-z0-9]{36,})|(?P<github_pat>github_pat_[A-Za-z0-9_]{50,})|(?P<aws_access_key>(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![A-Za-z0-9]))")
 
 
 # A PEM boundary alone is a public format constant, not private key material.
@@ -75,6 +75,10 @@ def scan_file(source, credential_file=False, chunk_size=1024 * 1024):
             print(json.dumps({"credential_rule": match.lastgroup,
                               "match_sha256": hashlib.sha256(match.group()).hexdigest(),
                               "match_length": len(match.group()), "file_offset": offset,
+                              "token_family": match.group()[:4].decode("ascii", errors="replace") if match.lastgroup.startswith("github") else None,
+                              "placeholder_markers": [word for word in ("fake", "example", "placeholder", "dummy", "test", "notreal", "notareal", "invalid", "redacted") if word.encode() in match.group().lower()],
+                              "context_markers": [word for word in ("fake", "example", "placeholder", "dummy", "test", "redact", "pattern", "regex") if word.encode() in match.string[max(0, match.start()-128):match.end()+128].lower()],
+                              "preceded_by_underscore": before == b"_", "followed_by_underscore": after == b"_",
                               "preceded_by_alphanumeric": bool(before and re.fullmatch(rb"[A-Za-z0-9]", before)),
                               "followed_by_alphanumeric": bool(after and re.fullmatch(rb"[A-Za-z0-9]", after)),
                               "elf_scope": elf_match_scope(source, header, offset),

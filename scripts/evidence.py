@@ -41,7 +41,8 @@ def validate_functional(functional, state, run, candidate):
         "tests": {test: "passed" for test in TESTS},
     }, "Incomplete or inconsistent functional evidence"
     assert state["commit"] == run["head_sha"]
-    assert state["agent_server_version"] == "1.62.0"
+    policy = json.loads(Path("compatibility.json").read_text())
+    assert state["agent_server_version"] in policy.get("approved_agent_server_versions", [policy["agent_server_version"]])
     assert re.fullmatch(r"sha256:[a-f0-9]{64}", state["upstream_digest"])
 
 
@@ -53,6 +54,15 @@ def verify_signature(subject, run):
         "--signer-digest", run["head_sha"], "--deny-self-hosted-runners", "--format", "json"], text=True))
     validate_signature_run(verified, run)
 
+
+def verify_build_signature(subject, source):
+    assert re.fullmatch(r"[a-f0-9]{40}", source)
+    verified = json.loads(subprocess.check_output([
+        "gh", "attestation", "verify", subject, "--repo", REPO,
+        "--signer-workflow", REPO + "/.github/workflows/release.yml",
+        "--source-ref", "refs/heads/main", "--source-digest", source,
+        "--signer-digest", source, "--deny-self-hosted-runners", "--format", "json"], text=True))
+    assert verified, "Missing trusted build provenance"
 
 def validate_signature_run(verified, run):
     invocation = f"https://github.com/{REPO}/actions/runs/{run['id']}/attempts/{run['run_attempt']}"

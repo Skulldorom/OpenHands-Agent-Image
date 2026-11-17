@@ -36,17 +36,17 @@ class AssessmentTests(unittest.TestCase):
         result = self.run_assessment()
         self.assertFalse(result["pass"])
         self.assertEqual(len(result["findings"]), 2)
-        self.assertEqual([row["cve"] for row in result["blockers"]], ["CVE-2026-0001"])
+        self.assertEqual([row["cve"] for row in result["blockers"]], ["CVE-2026-0001", "CVE-2026-0002"])
         self.assertTrue(result["modification_pass"])
 
-    def test_unfixed_inherited_high_is_inventory_only(self):
+    def test_unfixed_inherited_high_requires_review(self):
         vulnerability = self.vulnerability()
         self.base["Results"][0]["Vulnerabilities"] = [deepcopy(vulnerability)]
         self.candidate["Results"][0]["Vulnerabilities"] = [deepcopy(vulnerability)]
         result = self.run_assessment()
         self.assertEqual(result["origin_counts"], {"inherited finding": 1})
-        self.assertEqual(result["blockers"], [])
-        self.assertTrue(result["pass"])
+        self.assertEqual(len(result["blockers"]), 1)
+        self.assertFalse(result["pass"])
         self.assertTrue(result["modification_pass"])
 
     def test_introduced_high_blocks_without_upstream_baseline(self):
@@ -129,11 +129,12 @@ class AcceptanceTests(unittest.TestCase):
         self.record.update(status="approved", approved_by="Test owner", approval_date=date.today().isoformat(),
                            expires=(date.today() + timedelta(days=1)).isoformat())
         self.policy = json.loads(Path("security/policy.json").read_text())
+        self.policy["high_risk_cves"] = {}
         self.policy["exceptions"] = [self.record]
         self.policy["acceptance_approvers"] = ["Test owner"]
         self.policy["review_date"] = self.record["expires"]
-        self.candidate_ref = "ghcr.io/skulldorom/openhands-agent@" + self.record["candidate_digest"]
-        self.upstream_ref = "ghcr.io/openhands/agent-server@" + self.record["upstream_digest"]
+        self.candidate_ref = "ghcr.io/skulldorom/openhands-agent@" + ("sha256:" + "a"*64)
+        self.upstream_ref = "ghcr.io/openhands/agent-server@" + ("sha256:" + "b"*64)
         result = {"Target": self.record["target"], "Class": self.record["result_class"], "Type": self.record["result_type"],
                   "Packages": [{"Name": self.record["package"]}],
                   "Vulnerabilities": [{"PkgName": self.record["package"], "InstalledVersion": self.record["installed"],
@@ -152,6 +153,18 @@ class AcceptanceTests(unittest.TestCase):
         self.assertTrue(result["findings"][0]["blocking_reasons"])
         self.assertEqual(result["accepted_exceptions"], [self.record])
         self.assertIn(self.record["id"], module.markdown(result))
+
+    def test_equivalent_risk_survives_digest_change(self):
+        self.candidate_ref = "ghcr.io/skulldorom/openhands-agent@sha256:" + "c"*64
+        self.upstream_ref = "ghcr.io/openhands/agent-server@sha256:" + "d"*64
+        self.candidate["ArtifactName"] = self.candidate_ref
+        self.upstream["ArtifactName"] = self.upstream_ref
+        self.assertTrue(self.assess()["pass"])
+
+    def test_unacceptable_designation_cannot_be_waived(self):
+        self.policy["high_risk_cves"][self.record["cve"]] = "unacceptable"
+        with self.assertRaises(AssertionError):
+            self.assess()
 
     def test_duplicate_ids_scopes_and_record_reuse_fail(self):
         self.policy["exceptions"].append(deepcopy(self.record))
@@ -177,8 +190,8 @@ class AcceptanceTests(unittest.TestCase):
 
     def test_each_scope_change_blocks(self):
         for field, value in {"cve": "CVE-2026-99999", "package": "other/module", "installed": "v99",
-                             "target": "usr/bin/other", "upstream_digest": "sha256:" + "a" * 64,
-                             "candidate_digest": "sha256:" + "b" * 64, "result_class": "other", "result_type": "other"}.items():
+                             "target": "usr/bin/other", "upstream_origin": "other/origin",
+                             "exposure_assumptions": "changed assumptions", "result_class": "other", "result_type": "other"}.items():
             with self.subTest(field=field):
                 previous = self.record[field]
                 self.record[field] = value
@@ -189,7 +202,7 @@ class AcceptanceTests(unittest.TestCase):
     def test_expired_future_unapproved_malformed_and_wildcards_fail_closed(self):
         for field, value in {"expires": (date.today() - timedelta(days=1)).isoformat(),
                              "approval_date": (date.today() + timedelta(days=1)).isoformat(),
-                             "status": "proposed", "target": "*", "approved_by": "Unauthorized owner", "upstream_digest": "invalid"}.items():
+                             "status": "proposed", "target": "*", "approved_by": "Unauthorized owner", "upstream_origin": "invalid"}.items():
             with self.subTest(field=field):
                 previous = self.record[field]
                 self.record[field] = value
@@ -220,7 +233,7 @@ class AcceptanceTests(unittest.TestCase):
     def test_proposed_records_are_inactive_and_rejected(self):
         policy = json.loads(Path("security/policy.json").read_text())
         self.assertEqual(policy["exceptions"], [])
-        self.assertFalse(policy["release_approved"])
+        self.assertNotIn("release_approved", policy)
         proposed = json.loads(Path("security/proposed-acceptances.json").read_text())["records"]
         self.assertEqual(len(proposed), 7)
         with self.assertRaises(AssertionError):

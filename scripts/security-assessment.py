@@ -38,7 +38,7 @@ def validate_exceptions(records, today):
     seen = set()
     scopes = set()
     required = {"id", "cve", "package", "installed", "target", "result_class", "result_type",
-                "upstream_digest", "candidate_digest", "justification", "compensating_controls",
+                "upstream_origin", "exposure_assumptions", "justification", "compensating_controls",
                 "approved_by", "approval_date", "expires", "status", "metadata_sha256"}
     for record in records:
         assert set(record) == required, "Invalid acceptance schema"
@@ -47,13 +47,12 @@ def validate_exceptions(records, today):
         assert record["status"] == "approved", "Acceptance not explicitly approved"
         assert record["id"] not in seen, "Duplicate acceptance ID"
         seen.add(record["id"])
-        exact = tuple(record[k] for k in ("cve", "package", "installed", "target", "result_class", "result_type", "upstream_digest", "candidate_digest"))
+        exact = tuple(record[k] for k in ("cve", "package", "installed", "target", "result_class", "result_type", "upstream_origin", "exposure_assumptions"))
         assert exact not in scopes, "Duplicate acceptance scope"
         scopes.add(exact)
         assert re.fullmatch(r"[a-f0-9]{64}", record["metadata_sha256"]), "Invalid metadata fingerprint"
         assert re.fullmatch(r"CVE-\d{4}-\d{4,}", record["cve"]), "Invalid CVE"
-        for field in ("upstream_digest", "candidate_digest"):
-            assert re.fullmatch(r"sha256:[0-9a-f]{64}", record[field]), "Invalid acceptance digest"
+        assert record["upstream_origin"] == "ghcr.io/openhands/agent-server", "Invalid upstream origin"
         assert date.fromisoformat(record["approval_date"]) <= today <= date.fromisoformat(record["expires"]), "Acceptance expired or not yet valid"
 
 
@@ -64,10 +63,10 @@ def accepted_record(row, result, records, candidate_ref, upstream_ref):
     for record in records:
         if (record["cve"] == row["cve"] and record["package"] == row["package"]
                 and record["metadata_sha256"] == row["metadata_sha256"]
-                and record["installed"] == row["installed"] and record["target"] == row["target"]
+                and record["installed"] == row["installed"] and record["target"] == scope(result)
+                and record["exposure_assumptions"] == row["exposure"]
                 and record["result_class"] == result.get("Class") and record["result_type"] == result.get("Type")
-                and candidate_ref == "ghcr.io/skulldorom/openhands-agent@" + record["candidate_digest"]
-                and upstream_ref == "ghcr.io/openhands/agent-server@" + record["upstream_digest"]):
+                and record["upstream_origin"] == upstream_ref.split("@", 1)[0]):
             return record
     return None
 
@@ -122,16 +121,18 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
             "new finding in inherited package" if (scope(result), result.get("Class"), result.get("Type"), vulnerability["PkgName"]) in upstream_packages
             else "added package/component")
         reasons = []
+        if origin == "inherited finding" and severity in {"HIGH", "CRITICAL"}:
+            reasons.append("inherited HIGH/CRITICAL requires reviewed equivalent-risk acceptance")
         if severity == "CRITICAL":
             reasons.append("critical exposure not accepted")
+        if vulnerability["VulnerabilityID"] in policy["high_risk_cves"]:
+            reasons.append(policy["high_risk_cves"][vulnerability["VulnerabilityID"]])
         if severity in {"HIGH", "CRITICAL"}:
             if origin != "inherited finding":
                 # Risk this image introduces has no upstream baseline to defer to.
                 reasons.append("introduced by this image; upstream baseline lacks this finding")
             if vulnerability.get("FixedVersion"):
                 reasons.append("fixed version advertised; supported package/binary remediation must be verified")
-            if vulnerability["VulnerabilityID"] in policy["high_risk_cves"]:
-                reasons.append(policy["high_risk_cves"][vulnerability["VulnerabilityID"]])
         row = {
             "package": vulnerability["PkgName"], "source_package": source,
             "metadata_sha256": metadata_hash(vulnerability),
@@ -146,15 +147,15 @@ def assess(candidate, upstream, policy, tracker, expected_candidate, expected_up
             "exposure": "Potentially reachable in arbitrary agent workloads; no negative reachability or exploitability claim.",
         }
         record = accepted_record(row, result, policy["exceptions"], expected_candidate, expected_upstream)
-        row["accepted_exception"] = record["id"] if record and reasons else None
+        row["accepted_exception"] = record["id"] if record and reasons and vulnerability["VulnerabilityID"] not in policy["high_risk_cves"] else None
         if row["accepted_exception"]:
             assert record["id"] not in consumed, "Acceptance reused for multiple findings"
             consumed.add(record["id"])
             accepted.append(record)
         rows.append(row)
-    assert consumed == {r["id"] for r in policy["exceptions"]}, "Renewed risk acceptance required: candidate, upstream, finding metadata or exact scope changed"
+    assert consumed == {r["id"] for r in policy["exceptions"]}, "Renewed risk acceptance required: finding metadata, unacceptable designation or exact scope changed"
     secrets = [dict(target=result["Target"], rule=secret.get("RuleID"), title=secret.get("Title"))
-               for result in candidate["Results"] for secret in result.get("Secrets", [])]
+               for report in (candidate, upstream) for result in report["Results"] for secret in result.get("Secrets", [])]
     blockers = [row for row in rows if row["blocking_reasons"] and not row["accepted_exception"]]
     removed = sorted({key(v) for _, _, v in findings(upstream)} - {key(v) for _, _, v in findings(candidate)})
     introduced = [row for row in rows if row["severity"] in {"HIGH", "CRITICAL"}

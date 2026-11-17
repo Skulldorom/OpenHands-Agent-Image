@@ -6,18 +6,18 @@
       "cve": "CVE-2026-6653",
       "package": "libxml2",
       "installed": "2.12.7+dfsg+really2.9.14-2.1+deb13u3",
-      "target": "ghcr.io/skulldorom/openhands-agent@sha256:0e8e24ac5258ae9d709886fc3298cb1f028b25146e4c01389056c1fa762e81a0 (debian 13.7)",
+      "target": "os",
       "result_class": "os-pkgs",
       "result_type": "debian",
-      "upstream_digest": "sha256:e74009d51a352c3e9e8db30a788b15683de060c0b2f9e71e0b9d19576034c995",
-      "candidate_digest": "sha256:0e8e24ac5258ae9d709886fc3298cb1f028b25146e4c01389056c1fa762e81a0",
       "justification": "Proposed time-limited acceptance to preserve official Agent Server 1.62.0 functionality. This exact finding is inherited unchanged; custom Git and PostgreSQL additions introduce no HIGH/CRITICAL findings. Supported fixed upstream binaries/packages were not available in the recorded evidence. Exploitability is not ruled out.",
       "compensating_controls": "Run only trusted workloads during the acceptance period; do not supply untrusted XML, HTML, archives or container images to affected tools. Do not expose the Docker socket or grant privileged container access. Isolate conversation networks and credentials. These controls reduce exposure but do not prove safety.",
       "approved_by": "PENDING owner approval",
       "approval_date": "PENDING",
       "expires": "2026-12-16",
       "status": "proposed",
-      "metadata_sha256": "2810dc35f4665779b06ba94aa801379d127cf4e0fa206fc922140bd1352778aa"
+      "metadata_sha256": "2810dc35f4665779b06ba94aa801379d127cf4e0fa206fc922140bd1352778aa",
+      "upstream_origin": "ghcr.io/openhands/agent-server",
+      "exposure_assumptions": "Potentially reachable in arbitrary agent workloads; no negative reachability or exploitability claim."
     },
     {
       "id": "inherited-v1-2026-02",
@@ -27,15 +27,15 @@
       "target": "usr/bin/gh",
       "result_class": "lang-pkgs",
       "result_type": "gobinary",
-      "upstream_digest": "sha256:e74009d51a352c3e9e8db30a788b15683de060c0b2f9e71e0b9d19576034c995",
-      "candidate_digest": "sha256:0e8e24ac5258ae9d709886fc3298cb1f028b25146e4c01389056c1fa762e81a0",
       "justification": "Proposed time-limited acceptance to preserve official Agent Server 1.62.0 functionality. This exact finding is inherited unchanged; custom Git and PostgreSQL additions introduce no HIGH/CRITICAL findings. Supported fixed upstream binaries/packages were not available in the recorded evidence. Exploitability is not ruled out.",
       "compensating_controls": "Run only trusted workloads during the acceptance period; do not supply untrusted XML, HTML, archives or container images to affected tools. Do not expose the Docker socket or grant privileged container access. Isolate conversation networks and credentials. These controls reduce exposure but do not prove safety.",
       "approved_by": "PENDING owner approval",
       "approval_date": "PENDING",
       "expires": "2026-12-16",
       "status": "proposed",
-      "metadata_sha256": "6a3fd5ad74a29e174ba7a806d0dba7a13f823f1a0cff2570b7dc97ea0b3c143a"
+      "metadata_sha256": "6a3fd5ad74a29e174ba7a806d0dba7a13f823f1a0cff2570b7dc97ea0b3c143a",
+      "upstream_origin": "ghcr.io/openhands/agent-server",
+      "exposure_assumptions": "Potentially reachable in arbitrary agent workloads; no negative reachability or exploitability claim."
     },
     {
       "id": "inherited-v1-2026-03",
@@ -45,15 +45,15 @@
       "target": "usr/bin/rootlesskit",
       "result_class": "lang-pkgs",
       "result_type": "gobinary",
-      "upstream_digest": "sha256:e74009d51a352c3e9e8db30a788b15683de060c0b2f9e71e0b9d19576034c995",
-      "candidate_digest": "sha256:0e8e24ac5258ae9d709886fc3298cb1f028b25146e4c01389056c1fa762e81a0",
       "justification": "Proposed time-limited acceptance to preserve official Agent Server 1.62.0 functionality. This exact finding is inherited unchanged; custom Git and PostgreSQL additions introduce no HIGH/CRITICAL findings. Supported fixed upstream binaries/packages were not available in the recorded evidence. Exploitability is not ruled out.",
       "compensating_controls": "Run only trusted workloads during the acceptance period; do not supply untrusted XML, HTML, archives or container images to affected tools. Do not expose the Docker socket or grant privileged container access. Isolate conversation networks and credentials. These controls reduce exposure but do not prove safety.",
       "approved_by": "PENDING owner approval",
       "approval_date": "PENDING",
       "expires": "2026-12-16",
       "status": "proposed",
-      "metadata_sha256": "6a3fd5ad74a29e174ba7a806d0dba7a13f823f1a0cff2570b7dc97ea0b3c143a"
+      "metadata_sha256": "6a3fd5ad74a29e174ba7a806d0dba7a13f823f1a0cff2570b7dc97ea0b3c143a",
+      "upstream_origin": "ghcr.io/openhands/agent-server",
+      "exposure_assumptions": "Potentially reachable in arbitrary agent workloads; no negative reachability or exploitability claim."
     },
     {
       "id": "inherited-v1-2026-04",
@@ -63,15 +63,15 @@
       "target": "usr/libexec/docker/cli-plugins/docker-buildx",
       "result_class": "lang-pkgs",
       "result_type": "gobinary",
-      "upstream_digest": "sha256:e74009d51a352c3e9e8db30a788b15683de060c0b2f9e71e0b9d19576034c995",
-      "candidate_digest": "sha256:0e8e24ac5258ae9d709886fc3298cb1f028b25146e4c01389056c1fa762e81a0",
       "justification": "Proposed time-limited acceptance to preserve official Agent Server 1.62.0 functionality. This exact finding is inherited unchanged; custom Git and PostgreSQL additions introduce no HIGH/CRITICAL findings. Supported fixed upstream binaries/packages were not available in the recorded evidence. Exploitability is not ruled out.",
       "compensating_controls": "Run only trusted workloads during the acceptance period; do not supply untrusted XML, HTML, archives or container images to affected tools. Do not expose the Docker socket or grant privileged container access. Isolate conversation networks and credentials. These controls reduce exposure but do not prove safety.",
       "approved_by": "PENDING owner approval",
       "approval_date": "PENDING",
       "expires": "2026-12-16",
       "status": "proposed",
-      "metadata_sha256": "98edff72df7f6254dba191730dc4d39fc613c435045d4b56190d87b529087904"
+      "metadata_sha256": "98edff72df7f6254dba191730dc4d39fc613c435045d4b56190d87b529087904",
+      "upstream_origin": "ghcr.io/openhands/agent-server",
+      "exposure_assumptions": "Potentially reachable in arbitrary agent workloads; no negative reachability or exploitability claim."
     },
     {
       "id": "inherited-v1-2026-05",
@@ -81,15 +81,15 @@
       "target": "usr/libexec/docker/cli-plugins/docker-buildx",
       "result_class": "lang-pkgs",
       "result_type": "gobinary",
-      "upstream_digest": "sha256:e74009d51a352c3e9e8db30a788b15683de060c0b2f9e71e0b9d19576034c995",
-      "candidate_digest": "sha256:0e8e24ac5258ae9d709886fc3298cb1f028b25146e4c01389056c1fa762e81a0",
       "justification": "Proposed time-limited acceptance to preserve official Agent Server 1.62.0 functionality. This exact finding is inherited unchanged; custom Git and PostgreSQL additions introduce no HIGH/CRITICAL findings. Supported fixed upstream binaries/packages were not available in the recorded evidence. Exploitability is not ruled out.",
       "compensating_controls": "Run only trusted workloads during the acceptance period; do not supply untrusted XML, HTML, archives or container images to affected tools. Do not expose the Docker socket or grant privileged container access. Isolate conversation networks and credentials. These controls reduce exposure but do not prove safety.",
       "approved_by": "PENDING owner approval",
       "approval_date": "PENDING",
       "expires": "2026-12-16",
       "status": "proposed",
-      "metadata_sha256": "e936625c9d5c976bae3c39c5f57f6de796a80c1867a500d0b0d37b2eb4067906"
+      "metadata_sha256": "e936625c9d5c976bae3c39c5f57f6de796a80c1867a500d0b0d37b2eb4067906",
+      "upstream_origin": "ghcr.io/openhands/agent-server",
+      "exposure_assumptions": "Potentially reachable in arbitrary agent workloads; no negative reachability or exploitability claim."
     },
     {
       "id": "inherited-v1-2026-06",
@@ -99,15 +99,15 @@
       "target": "usr/libexec/docker/cli-plugins/docker-buildx",
       "result_class": "lang-pkgs",
       "result_type": "gobinary",
-      "upstream_digest": "sha256:e74009d51a352c3e9e8db30a788b15683de060c0b2f9e71e0b9d19576034c995",
-      "candidate_digest": "sha256:0e8e24ac5258ae9d709886fc3298cb1f028b25146e4c01389056c1fa762e81a0",
       "justification": "Proposed time-limited acceptance to preserve official Agent Server 1.62.0 functionality. This exact finding is inherited unchanged; custom Git and PostgreSQL additions introduce no HIGH/CRITICAL findings. Supported fixed upstream binaries/packages were not available in the recorded evidence. Exploitability is not ruled out.",
       "compensating_controls": "Run only trusted workloads during the acceptance period; do not supply untrusted XML, HTML, archives or container images to affected tools. Do not expose the Docker socket or grant privileged container access. Isolate conversation networks and credentials. These controls reduce exposure but do not prove safety.",
       "approved_by": "PENDING owner approval",
       "approval_date": "PENDING",
       "expires": "2026-12-16",
       "status": "proposed",
-      "metadata_sha256": "006ac7c9a8599b62a0485296726ffb9b7fee1cf8ef65a6da41c4ccf4eba815f8"
+      "metadata_sha256": "006ac7c9a8599b62a0485296726ffb9b7fee1cf8ef65a6da41c4ccf4eba815f8",
+      "upstream_origin": "ghcr.io/openhands/agent-server",
+      "exposure_assumptions": "Potentially reachable in arbitrary agent workloads; no negative reachability or exploitability claim."
     },
     {
       "id": "inherited-v1-2026-07",
@@ -117,15 +117,15 @@
       "target": "usr/libexec/docker/cli-plugins/docker-compose",
       "result_class": "lang-pkgs",
       "result_type": "gobinary",
-      "upstream_digest": "sha256:e74009d51a352c3e9e8db30a788b15683de060c0b2f9e71e0b9d19576034c995",
-      "candidate_digest": "sha256:0e8e24ac5258ae9d709886fc3298cb1f028b25146e4c01389056c1fa762e81a0",
       "justification": "Proposed time-limited acceptance to preserve official Agent Server 1.62.0 functionality. This exact finding is inherited unchanged; custom Git and PostgreSQL additions introduce no HIGH/CRITICAL findings. Supported fixed upstream binaries/packages were not available in the recorded evidence. Exploitability is not ruled out.",
       "compensating_controls": "Run only trusted workloads during the acceptance period; do not supply untrusted XML, HTML, archives or container images to affected tools. Do not expose the Docker socket or grant privileged container access. Isolate conversation networks and credentials. These controls reduce exposure but do not prove safety.",
       "approved_by": "PENDING owner approval",
       "approval_date": "PENDING",
       "expires": "2026-12-16",
       "status": "proposed",
-      "metadata_sha256": "6a3fd5ad74a29e174ba7a806d0dba7a13f823f1a0cff2570b7dc97ea0b3c143a"
+      "metadata_sha256": "6a3fd5ad74a29e174ba7a806d0dba7a13f823f1a0cff2570b7dc97ea0b3c143a",
+      "upstream_origin": "ghcr.io/openhands/agent-server",
+      "exposure_assumptions": "Potentially reachable in arbitrary agent workloads; no negative reachability or exploitability claim."
     }
   ]
 }

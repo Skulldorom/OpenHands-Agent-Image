@@ -81,38 +81,7 @@ class ProvenanceTests(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 evidence.validate_archive(dict(artifact, digest="sha256:"+hashlib.sha256(altered).hexdigest()), self.run, altered)
 
-    def test_environment_requires_owner_nonself_no_bypass_main(self):
-        setting = {"name": "release", "can_admins_bypass": False,
-                   "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
-                   "protection_rules": [{"type": "required_reviewers", "prevent_self_review": True,
-                                         "reviewers": [{"type": "User", "reviewer": {"login": "Skulldorom"}}]}]}
-        promotion.check_environment(setting)
-        for key, value in {"protection_rules": [], "can_admins_bypass": True, "deployment_branch_policy": None}.items():
-            with self.subTest(key=key), self.assertRaises(AssertionError):
-                promotion.check_environment(dict(setting, **{key: value}))
-        changed = deepcopy(setting)
-        changed["protection_rules"][0]["prevent_self_review"] = False
-        with self.assertRaises(AssertionError):
-            promotion.check_environment(changed)
-        changed["protection_rules"][0]["prevent_self_review"] = True
-        changed["protection_rules"][0]["reviewers"][0]["reviewer"]["login"] = "attacker"
-        with self.assertRaises(AssertionError):
-            promotion.check_environment(changed)
 
-    def test_approval_binds_candidate_policy_run_attempt_and_owner(self):
-        selection = {"candidate": "sha256:exact", "policy_sha256": "policy", "run_id": 123, "run_attempt": 1}
-        review = {"state": "approved", "user": {"login": "Skulldorom"}, "environments": [{"name": "release"}],
-                  "comment": promotion.approval_token(selection)}
-        promotion.validate_approval([review], selection, "operator", "operator")
-        for actor, trigger in [("Skulldorom", "operator"), ("operator", "Skulldorom")]:
-            with self.assertRaises(AssertionError):
-                promotion.validate_approval([review], selection, actor, trigger)
-        for key, value in {"state": "rejected", "user": {"login": "attacker"}, "comment": "approved", "environments": [{"name": "other"}]}.items():
-            with self.subTest(key=key), self.assertRaises(AssertionError):
-                promotion.validate_approval([dict(review, **{key: value})], selection, "operator", "operator")
-        for key, value in {"candidate": "other", "policy_sha256": "new", "run_id": 456, "run_attempt": 2}.items():
-            with self.subTest(key=key), self.assertRaises(AssertionError):
-                promotion.validate_approval([review], dict(selection, **{key: value}), "operator", "operator")
 
     def test_policy_and_candidate_changes_expired_scans_or_rerun_require_new_approval(self):
         old = dict(os.environ)

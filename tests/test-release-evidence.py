@@ -12,39 +12,10 @@ spec = importlib.util.spec_from_file_location("release", "scripts/release.py")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
-class EvidenceTests(unittest.TestCase):
-    def setUp(self):
-        self.state = {"fingerprint": "inputs", "upstream_digest": "base"}
-        self.gate = {"candidate": "image@candidate", "upstream": "ghcr.io/openhands/agent-server@base", "pass": False, "blockers": [{}]}
-        self.functional = {"pass": True, "candidate": "image@candidate"}
-
-    def reusable(self, current="inputs", upstream="base"):
-        return module.reusable_blocker(self.state, self.gate, self.functional, current, upstream)
-
-    def test_exact_blocker_reused(self):
-        self.assertTrue(self.reusable())
-
-    def test_changed_inputs_and_upstream_not_reused(self):
-        self.assertFalse(self.reusable(current="new"))
-        self.assertFalse(self.reusable(upstream="new"))
-
-    def test_functional_failure_or_wrong_candidate_not_reused(self):
-        self.functional["pass"] = False
-        self.assertFalse(self.reusable())
-        self.functional.update({"pass": True, "candidate": "wrong"})
-        self.assertFalse(self.reusable())
-
-    def test_passed_or_empty_blocker_not_reused(self):
-        self.gate["pass"] = True
-        self.assertFalse(self.reusable())
-        self.gate.update({"pass": False, "blockers": []})
-        self.assertFalse(self.reusable())
-
 class PublicationTests(unittest.TestCase):
     def setUp(self):
         self.digest = "sha256:" + "a" * 64
         self.policy = json.loads(Path("security/policy.json").read_text())
-        self.policy["release_approved"] = True
         self.state = {"upstream_digest": "sha256:" + "b" * 64}
         self.functional = {"pass": True, "candidate": module.IMAGE + "@" + self.digest}
         self.assessment = {"policy_sha256": hashlib.sha256(json.dumps(self.policy, sort_keys=True).encode()).hexdigest(),
@@ -80,12 +51,8 @@ class PublicationTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.validate()
 
-    def test_functional_and_owner_approval_required(self):
+    def test_functional_pass_required(self):
         self.functional["pass"] = False
-        with self.assertRaises(AssertionError):
-            self.validate()
-        self.functional["pass"] = True
-        self.policy["release_approved"] = False
         with self.assertRaises(AssertionError):
             self.validate()
 

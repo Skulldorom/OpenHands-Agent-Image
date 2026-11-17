@@ -2,6 +2,7 @@
 """Inspect every saved layer, including files hidden by later whiteouts."""
 import re
 import hashlib
+import struct
 import json
 import subprocess
 import sys
@@ -24,22 +25,51 @@ def credential_matches(raw):
             yield match
 
 
+def elf_match_scope(source, header, offset):
+    # Diagnostic only: section flags are not an exemption for any credential.
+    if len(header) < 64 or header[:6] != b"\x7fELF\x02\x01":
+        return None
+    table = struct.unpack_from("<Q", header, 40)[0]
+    width, count = struct.unpack_from("<HH", header, 58)
+    if width != 64 or not 0 < count <= 4096 or table < source.tell():
+        return None
+    try:
+        source.seek(table)
+        data = source.read(width * count)
+        for index in range(count):
+            section = struct.unpack_from("<IIQQQQIIQQ", data, index * width)
+            if section[1] != 8 and section[4] <= offset < section[4] + section[5]:
+                return {"section_index": index, "section_type": section[1], "section_flags": section[2],
+                        "executable_section": bool(section[2] & 4)}
+    except (OSError, ValueError, struct.error):
+        return None
+    return None
+
+
 def scan_file(source, credential_file=False, chunk_size=1024 * 1024):
     """Inspect all bytes with bounded memory, retaining cross-chunk key prefixes."""
     tail = b""
+    header = None
     while True:
         chunk = source.read(chunk_size)
         if not chunk:
             return None
+        if header is None:
+            header = chunk[:64]
         if credential_file and chunk.strip():
             return "credential_file"
         raw = tail + chunk
         match = next(credential_matches(raw), None)
         if match:
             # Classification metadata only. Never print matched content/context.
+            offset = source.tell() - len(raw) + match.start()
+            before, after = raw[max(0, match.start()-1):match.start()], raw[match.end():match.end()+1]
             print(json.dumps({"credential_rule": match.lastgroup,
                               "match_sha256": hashlib.sha256(match.group()).hexdigest(),
-                              "match_length": len(match.group()),
+                              "match_length": len(match.group()), "file_offset": offset,
+                              "preceded_by_alphanumeric": bool(before and re.fullmatch(rb"[A-Za-z0-9]", before)),
+                              "followed_by_alphanumeric": bool(after and re.fullmatch(rb"[A-Za-z0-9]", after)),
+                              "elf_scope": elf_match_scope(source, header, offset),
                               "documented_aws_example": match.group() == b"AKIAIOSFODNN7EXAMPLE"}))
             return match.lastgroup
         tail = raw[-4096:]

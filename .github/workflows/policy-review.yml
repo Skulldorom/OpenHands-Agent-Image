@@ -73,6 +73,11 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Inspect every upstream layer for credentials
+        run: |
+          upstream=$(sed -n 's/^ARG UPSTREAM_IMAGE=//p' Dockerfile)
+          docker pull "$upstream"
+          timeout 15m python3 tests/test-image-layers.py "$upstream"
       - name: Build local validation image only
         run: docker build --tag local-pr-validation .
       - name: Real Git PostgreSQL API and signals
@@ -93,5 +98,4 @@ jobs:
           print("Upstream diff IDs: " + json.dumps(base))
           print(f"Verified upstream layer prefix: {len(base)} of {len(candidate)} layers; exact upstream prefix verified")
           PYCODE
-          timeout 15m python3 tests/test-image-layers.py "$upstream"
           timeout 15m python3 tests/test-image-layers.py local-pr-validation

@@ -5,6 +5,9 @@ import io
 import tarfile
 import subprocess
 import unittest
+import struct
+import json
+from contextlib import redirect_stdout
 
 spec = importlib.util.spec_from_file_location('layers', 'tests/test-image-layers.py')
 layers = importlib.util.module_from_spec(spec)
@@ -91,6 +94,22 @@ class LayerTests(unittest.TestCase):
             raw = b' '*(1024*1024+1) + b'password=value'
             with self.assertRaisesRegex(AssertionError, 'credential_file'):
                 layers.check_layers(io.BytesIO(archive({'old/layer.tar': archive({name: raw})})))
+
+    def test_elf_diagnostics_work_on_streams_and_do_not_exempt_code_sections(self):
+        table = 2*1024*1024
+        header = bytearray(64)
+        header[:6] = b'\x7fELF\x02\x01'
+        struct.pack_into('<Q', header, 40, table)
+        struct.pack_into('<HH', header, 58, 64, 1)
+        payload = bytes(header) + b'\x00'*64 + b'AKIA' + b'A1'*8
+        payload += b'\x00'*(table-len(payload))
+        payload += struct.pack('<IIQQQQIIQQ', 0, 1, 6, 0, 64, table-64, 0, 0, 0, 0)
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaisesRegex(AssertionError, 'rule=aws_access_key'):
+            layers.check_layers(io.BytesIO(archive({'old/layer.tar': archive({'usr/bin/node': payload})})))
+        record = json.loads(output.getvalue())
+        self.assertTrue(record['elf_scope']['executable_section'])
+        self.assertEqual(record['file_offset'], 128)
 
     def test_all_matches_checked_after_harmless_literal(self):
         raw = b'\x00-----BEGIN PRIVATE KEY-----\x00' + b'ghp_' + b'Z' * 36

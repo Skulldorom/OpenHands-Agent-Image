@@ -34,14 +34,19 @@ def elf_match_scope(source, header, offset):
     if width != 64 or not 0 < count <= 4096 or table < source.tell():
         return None
     try:
-        source.seek(table)
+        remaining = table - source.tell()
+        while remaining:
+            chunk = source.read(min(remaining, 1024 * 1024))
+            if not chunk:
+                return None
+            remaining -= len(chunk)
         data = source.read(width * count)
         for index in range(count):
             section = struct.unpack_from("<IIQQQQIIQQ", data, index * width)
             if section[1] != 8 and section[4] <= offset < section[4] + section[5]:
                 return {"section_index": index, "section_type": section[1], "section_flags": section[2],
                         "executable_section": bool(section[2] & 4)}
-    except (OSError, ValueError, struct.error):
+    except (OSError, ValueError, struct.error, tarfile.TarError):
         return None
     return None
 
@@ -62,8 +67,9 @@ def scan_file(source, credential_file=False, chunk_size=1024 * 1024):
         match = next(credential_matches(raw), None)
         if match:
             # Classification metadata only. Never print matched content/context.
-            offset = source.tell() - len(raw) + match.start()
-            before, after = raw[max(0, match.start()-1):match.start()], raw[match.end():match.end()+1]
+            raw_start = raw.find(match.group())
+            offset = source.tell() - len(raw) + raw_start
+            before, after = match.string[max(0, match.start()-1):match.start()], match.string[match.end():match.end()+1]
             print(json.dumps({"credential_rule": match.lastgroup,
                               "match_sha256": hashlib.sha256(match.group()).hexdigest(),
                               "match_length": len(match.group()), "file_offset": offset,

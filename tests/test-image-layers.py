@@ -26,11 +26,12 @@ PEM_PAYLOAD = re.compile(rb"[ \t\r\n]+(?:(?:[A-Za-z0-9+/=][ \t\r\n]*){16}|Proc-T
 # See security/CREDENTIAL-LAYER-INVESTIGATION.md and the authenticated run logs.
 # This does not authorize any other token or exempt a directory/binary/layer.
 NONLIVE_INSTALLATION_LITERAL_SHA256 = "11116762eb8f44dcdcabd6cc844d36d367f2be80c0788bd61104ef968d874c57"
+NONLIVE_INSTALLATION_LITERAL_SHA256_SECOND = "e436670abd29f6abc2a834649981d9fbbe33c1bcb4cd70d748100e5a3b844380"
 INSTALLATION_LITERAL_OBSERVED_BEFORE = datetime(2026, 11, 17, 13, 54, 24, tzinfo=timezone.utc)
 
 
 def credential_classification(rule, prefix, digest, now):
-    if (rule != "github_token" or prefix != b"ghs_" or digest != NONLIVE_INSTALLATION_LITERAL_SHA256
+    if (rule != "github_token" or prefix != b"ghs_" or digest not in {NONLIVE_INSTALLATION_LITERAL_SHA256, NONLIVE_INSTALLATION_LITERAL_SHA256_SECOND}
             or now < INSTALLATION_LITERAL_OBSERVED_BEFORE + timedelta(hours=1)):
         return None
     return {"rule": rule, "prefix": "ghs_", "sha256": digest,

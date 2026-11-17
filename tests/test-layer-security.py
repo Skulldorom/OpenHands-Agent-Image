@@ -136,6 +136,7 @@ class LayerTests(unittest.TestCase):
         now = layers.INSTALLATION_LITERAL_OBSERVED_BEFORE + timedelta(hours=2)
         digest = layers.NONLIVE_INSTALLATION_LITERAL_SHA256
         self.assertIsNotNone(layers.credential_classification('github_token', b'ghs_', digest, now))
+        self.assertIsNotNone(layers.credential_classification('github_token', b'ghs_', layers.NONLIVE_INSTALLATION_LITERAL_SHA256_SECOND, now))
         for rule, prefix, sha, stamp in [('github_token', b'ghp_', digest, now), ('github_installation', b'ghs_', digest, now),
                 ('github_token', b'ghs_', 'a'*64, now), ('github_token', b'ghs_', digest, now-timedelta(hours=2))]:
             self.assertIsNone(layers.credential_classification(rule, prefix, sha, stamp))

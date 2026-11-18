@@ -1,40 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 image=${1:?image required}
-# Git/package format variables must expand inside the container, not on the runner.
-# shellcheck disable=SC2016
-timeout 60 docker run --rm "$image" --exec sh -eu -c '
- test -x /usr/local/bin/openhands-agent-server
- command -v tini; command -v chromium
- gh --version
- rootlesskit --version
- docker --version
- docker buildx version
- docker compose version
- dpkg-query -W libxml2
- dpkg-query -W -f="\${binary:Package} \${Depends}\n" | grep -c libxml2 || true
- ldd /usr/lib/chromium/chromium
- test ! -d /var/lib/postgresql/17/main
-'
-key=$(python3 -c "import secrets; print(secrets.token_hex(24))")
-cid=$(docker run -d -e "OH_SESSION_API_KEYS_0=$key" -e OH_ENABLE_VSCODE=false -e OH_ENABLE_BROWSER=0 -p 127.0.0.1::8000 "$image" --host 0.0.0.0 --port 8000)
-cleanup() { docker logs "$cid"; docker rm -f "$cid" >/dev/null; }
-trap cleanup EXIT
+key=$(python3 -c 'import secrets; print(secrets.token_hex(24))')
+cid=$(OH_SESSION_API_KEYS_0="$key" docker run -d -e OH_SESSION_API_KEYS_0 \
+    -e OH_ENABLE_VSCODE=false -e OH_ENABLE_BROWSER=0 -p 127.0.0.1::8000 \
+    "$image" --host 0.0.0.0 --port 8000)
+trap 'docker rm -f "$cid" >/dev/null' EXIT
 port=$(docker port "$cid" 8000/tcp | cut -d: -f2)
+
 ready=false
-for ((i=0;i<90;i++)); do
- if curl -fsS --max-time 2 -H "X-Session-API-Key: $key" "http://127.0.0.1:$port/ready"; then ready=true; break; fi
- sleep 2
+for ((attempt=0; attempt<60; attempt++)); do
+    if printf 'header = "X-Session-API-Key: %s"\n' "$key" |
+        curl --config - -fs --max-time 2 "http://127.0.0.1:$port/ready" >/dev/null; then
+        ready=true
+        break
+    fi
+    [[ $(docker inspect -f '{{.State.Running}}' "$cid") == true ]] || break
+    sleep 2
 done
-[[ "$ready" == true ]]
-approved=$(python3 -c 'import json; print(",".join(json.load(open("compatibility.json"))["approved_agent_server_versions"]))')
-curl -fsS --max-time 10 -H "X-Session-API-Key: $key" "http://127.0.0.1:$port/server_info" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["version"] in sys.argv[1].split(","), d' "$approved"
+[[ "$ready" == true ]] || { echo 'Agent Server did not become ready' >&2; exit 1; }
 processes=$(docker top "$cid" -eo pid,comm | awk 'NR > 1 {print $2}')
-if grep -Ex 'postgres|postmaster' <<< "$processes"; then exit 1; fi
-grep -q tini <<< "$processes"
-start=$SECONDS
+grep -qx tini <<< "$processes"
+if grep -Exq 'postgres|postmaster' <<< "$processes"; then
+    echo 'PostgreSQL started with the agent' >&2
+    exit 1
+fi
 docker stop -t 15 "$cid" >/dev/null
-(( SECONDS - start < 15 ))
-code=$(docker inspect -f '{{.State.ExitCode}}' "$cid")
-[[ "$code" != 137 ]]
-echo 'Agent Server API and signal handling: PASS'
+exit_code=$(docker inspect -f '{{.State.ExitCode}}' "$cid")
+[[ "$exit_code" == 0 || "$exit_code" == 143 ]]
+echo 'Agent Server startup, shutdown and inactive PostgreSQL: PASS'

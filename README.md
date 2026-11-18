@@ -1,69 +1,99 @@
-# OpenHands Agent image
+# OpenHands Agent Image
 
-Public reusable image: `ghcr.io/skulldorom/openhands-agent`. Based on the official `ghcr.io/openhands/agent-server:latest-python`, with runtime Git identity initialization and local PostgreSQL 17 server/client tools. No personal identity, tokens, database passwords or private keys are embedded. PostgreSQL never starts with the agent.
+`ghcr.io/skulldorom/openhands-agent:latest` extends the official
+`ghcr.io/openhands/agent-server:latest-python` image with runtime Git identity
+configuration and PostgreSQL 17 server and client tools. The published image
+targets Linux AMD64 and runs Agent Server as the upstream `openhands` user.
 
-## Automatic releases
+## Git identity
 
-`upstream-update.yml` checks daily at 05:23 UTC. `ci.yml` checks main changes and supports manual dispatch with `auto`, `patch`, `minor` or `major`. Both call `release.yml`, with serialized publication; ordinary eligible updates need no recurring Environment approval or GitHub App.
+Set these variables in the **conversation container's** runtime environment.
 
-The planner resolves the exact current upstream digest and approved runtime contract. **Every push or merge to main and every manual dispatch forces a fresh, uncached Docker build**, including documentation-only main commits and unchanged upstream/build inputs. Manual dispatch never bypasses functional or security checks. Each build records the exact source SHA, upstream digest, SBOM and provenance under a unique `candidate-RUN-ATTEMPT` tag. An existing run tag fails closed; no content marker is overwritten.
+| Variable | Purpose |
+| --- | --- |
+| `GIT_USER_NAME` | Default author and committer name |
+| `GIT_USER_EMAIL` | Default author and committer email |
+| `GIT_AUTHOR_NAME` | Override the author name |
+| `GIT_AUTHOR_EMAIL` | Override the author email |
+| `GIT_COMMITTER_NAME` | Override the committer name |
+| `GIT_COMMITTER_EMAIL` | Override the committer email |
 
-| Trigger | Build | Publication |
-| --- | --- | --- |
-| Main push/merge | Always fresh | Only after all gates pass |
-| Manual dispatch on main | Always fresh; auto/patch/minor/major | Only after all gates pass |
-| Daily schedule | Rebuild for changed upstream or image inputs; otherwise reuse | Only after fresh validation and security checks |
-| Pull request | Local build, functional and credential-layer tests | Never production publication |
+For example, set `GIT_USER_NAME=Example Developer` and
+`GIT_USER_EMAIL=developer@example.invalid` in your container configuration.
+Each field is independent. Explicit Git author or committer variables take
+precedence, even when set to an empty string. An omitted field with no default
+resolves through normal Git configuration. Git identity is passed in the process
+environment, so `git config user.name` continues to show configured Git values.
+Use `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT` to see the
+effective identity. Recreate the conversation container to apply changed
+environment variables. Starting the same Docker container again reuses its
+original environment. Verify that your OpenHands host forwards the variables
+to the conversation container when using Docker-based conversations.
 
-Scheduled checks ignore documentation when deciding whether to rebuild. Small immutable per-run candidate journals allow retries after failed functional or security validation. Pending publication takes priority over other retained candidates. Journals expire after 90 days; if none is available among the latest 100 repository artifacts, a legacy marker may be reused or a fresh build is required. Retained candidates require signed original build provenance and exact base binding; build completion never counts as functional validation. Reused candidates currently rerun all functional tests and fresh scans, avoiding rebuilds without trusting failed or stale tests. Missing provenance fails closed.
+## Git authentication
 
-Lifecycle states: `build_failed`, `built`, `functional_failed`, `functional_passed`, `security_failed`, `validated`, `published`. Reports and state are retained as Actions artifacts for 90 days. Failed tests retry on the next scheduled/manual run; failed security policy never suppresses retries or authorizes publication.
-
-Four deterministic fingerprints track image content (Dockerfile, init script, base and architecture), functional tests/compatibility, security policy/scanner settings/emergency blocks, and publisher/workflows. During scheduled checks, policy/test/publisher changes revalidate without rebuilding. Main pushes and manual dispatch always build. Version/revision image labels retain original build identity when reusing an image; release metadata records current authorization source.
-
-The validation job signs functional evidence and seals complete scans, database hash, package inventory and policy decision. A separate minimally privileged publisher downloads the exact GitHub artifact hash, verifies provenance, reassesses raw scans and checks current main SHA and upstream digest. It never rebuilds. Validation jobs run independently so a newer push cannot discard a pending build. The non-cancelling publisher concurrency group prevents conflicting publishers; freshness and newer-version checks prevent stale `latest` updates.
-
-### Versioning and interrupted publication
-
-A new build does not necessarily mean a new release. Build, validation and publication decisions are separate. After all gates pass, an identical OCI digest reuses the previous approved release unless an explicit patch/minor/major dispatch override or minor/major commit directive requests a release. Fresh validation artifacts are retained and an immutable `reassessment-HASH.zip` is appended; original approval assets and release source provenance remain unchanged. Version/revision labels, package changes and SBOM/provenance manifests can make fresh builds produce different digests even when Dockerfile inputs are unchanged.
-
-The **official OpenHands image is the security baseline**. Complete unsuppressed scans of the exact upstream and custom digests use Trivy 0.69.3 and the same frozen vulnerability database. Unchanged inherited vulnerabilities remain visible, including HIGH/CRITICAL findings and available fixes, and do not automatically block publication. Custom-introduced HIGH/CRITICAL findings, materially worsened inherited risk, introduced/dangerous credentials, changed credential baselines, reviewed emergency blocks or invalid/incomplete evidence block publication. A successful build alone never authorizes `v1.0.0`. Candidate images may exist while publication is blocked. `latest` always identifies the latest approved release (or the approved pending release during finalization); security rejection prevents promotion.
-
-First release is `v1.0.0`; later releases default to patch. Manual minor/major overrides and exact commit directives `release:minor` / `release:major` select increments. Immutable image tags `1.0.0` and `v1.0.0` must resolve to the expected candidate digest and cannot be overwritten with another image.
-
-A draft GitHub Release reserves durable publication intent before registry writes. Reconciliation prepares immutable image references, verifies the Git tag, attaches evidence, rechecks freshness, updates and verifies `latest`, then finalizes GitHub Release metadata. Failures at any boundary retry the same version, including failure after `latest`. A forced build still runs while publication is pending; if its digest differs from the reservation, publication blocks until the scheduled path revalidates and recovers the reserved digest. It never substitutes a fresh image into an existing reservation. Existing conflicting tags fail closed. If upstream changes while a draft is pending, the run blocks for maintainer review rather than discarding the reservation or publishing stale content. Rollback uses a previous release digest; never rebuild an old release. Stale source/upstream checks and version ownership conflicts fail closed when pushes overlap. Production GitHub/GHCR publication and recovery have not been tested end to end; the isolated sandbox integration remains unverified.
-
-## Security comparison
-
-CI and release notes distinguish **Custom image security: PASS/FAIL** from **Inherited upstream security: reported, not automatically blocked**. Reports include severity totals, unchanged inherited findings, introduced findings, removed findings, material worsening, emergency matches and secret detections. A CVE appearing in a custom-added binary cannot borrow inheritance from another binary. A changed vulnerable package version is conservatively blocked as potential worsening; severity increases also block. Lower-severity additions remain visible.
-
-When an approved release exists, its original immutable approval commitment identifies the previous upstream digest. That exact previous upstream is rescanned alongside the current upstream and candidate with the same frozen database. Newly appearing upstream findings are highlighted even if unchanged in our image. Before the first approved release, reports explicitly say that no previous approved baseline exists. A changed baseline during overlapping validation fails closed and requires reassessment.
-
-The security audit, complete saved-layer inspection and signed provenance checks remain mandatory. Fourteen verified public test keys retain narrow classifications. The five unchanged unclassified upstream token-shaped findings are reported as explicitly accepted baseline risk, not proven harmless. Added/changed custom findings, changed upstream digests/inventories, dangerous credentials and invalid evidence block publication. See [SECURITY.md](SECURITY.md#credential-baseline-risk-decision). Vulnerability comparison and release automation remain unchanged. Real production publishing/recovery remains untested end to end.
-
-## Runtime identity
-
-```env
-GIT_USER_NAME=
-GIT_USER_EMAIL=
-```
-
-Supply both at runtime. Missing, partial, malformed and injection attempts are tested; real commits verify author and committer identities. Existing Git configuration is preserved. Attribution does not authenticate to GitHub.
-
-## Agent Canvas integration and forwarding
-
-The host Agent Server does not automatically forward these two variables to conversation containers. Setting them only on the host is insufficient; the image cannot repair host forwarding. See [LXC-MIGRATION.md](LXC-MIGRATION.md) for the separately reviewed operator procedure. No live host changes are part of this PR.
+Configure Git authentication separately from commit attribution. Forward an
+SSH agent socket and set `SSH_AUTH_SOCK` inside the container, or mount
+restricted SSH credentials and `known_hosts` at runtime. For HTTPS, use your
+runtime Git credential helper or OpenHands' runtime authentication integration.
+Make mounts readable by the container's `openhands` user. Keep credentials out
+of Git remote URLs, Docker builds and the repository.
 
 ## PostgreSQL 17
 
-Includes `psql`, `pg_dump`, `pg_restore`, `pg_isready`, `initdb`, `pg_ctl`, and `postgres`. Isolated tests create a temporary local cluster, query it, dump, restore and shut it down. No external PostgreSQL container is required. The old LXC PostgreSQL provisioning manager has already been removed. Temporary clusters are not durable database services.
+`psql`, `pg_dump`, `pg_restore`, `initdb`, `pg_ctl` and `postgres` are available on
+`PATH`. Pass a connection string or regular PostgreSQL client settings at runtime
+to use an existing database. For local development, initialize a writable data
+directory with `initdb -D <data-dir>` and start it explicitly with
+`pg_ctl -D <data-dir> -l <log-file> start`. Configure authentication before
+exposing any listener. Mount storage for data that must outlive the container.
+Starting Agent Server leaves PostgreSQL stopped.
 
-## GitHub setup and blocked runs
+## Builds and updates
 
-One-time: enable Actions, allow `GITHUB_TOKEN` package writes, link the GHCR package to this repository, make the package public and protect main/workflow/security-policy changes with maintainer review. The publisher additionally needs contents write and attestations read; validation needs OIDC/attestations write. No App credentials, promotion enablement flags or recurring Environment reviewer are required.
+| Trigger | What happens |
+| --- | --- |
+| Push to `main` | Build and validate the current upstream |
+| Daily at 05:23 UTC | Build when upstream or tracked image/validation inputs differ from the published image |
+| Manual dispatch | Build and validate the current upstream. Dispatch on `main` to publish after validation |
+| Pull request to `main` | Build and validate locally on the GitHub runner |
 
-No per-CVE inherited-risk approvals are required. The reviewed emergency denylist is currently empty; see [SECURITY.md](SECURITY.md) for its schema and the documented retirement of the old five blanket blockers. Inspect run summaries and the `validation-RUN-ATTEMPT` artifact (`state.json`, full scans, comparison, frozen database, previous approved upstream baseline and blocker report). Unknown Agent Server versions require explicit compatibility review; only `1.62.0` is approved.
+Each build resolves the upstream tag to an immutable digest and checks its
+startup contract. The workflow tests Agent Server startup and shutdown, Git
+identity and a real PostgreSQL cluster. It reports inherited vulnerabilities,
+blocks new or worsened HIGH/CRITICAL findings and added secret detections, and
+checks for supported live credentials across the candidate. Scanner coverage
+depends on the tools' detection rules and supported verification endpoints.
+Raw secret findings stay off logs and published artifacts.
 
-## Tests
+The publisher uses the repository's `GITHUB_TOKEN`. Give this repository Actions
+write access to the GHCR package and make the package public so the daily check
+can read `latest` anonymously. Successful production runs publish a unique
+`build-<source-sha>-<run-id>-<attempt>` rollback tag with BuildKit provenance,
+then move `latest` to the same OCI digest. Production runs are serialized and
+recheck both upstream and `main` before updating `latest`.
 
-Run Python behavioral suites in `tests/test-*.py` (layer and historical-evidence scripts require their documented artifact/image argument), ShellCheck and actionlint. `scripts/validate-image.sh IMAGE@DIGEST` runs real Git, PostgreSQL, Agent Server readiness and signal tests; `tests/test-image-layers.py IMAGE@DIGEST` checks layers. Docker integration runs on GitHub Actions, not the LXC. PR policy CI has no publication permission.
+Use `ghcr.io/skulldorom/openhands-agent:latest` to follow successful builds.
+To roll back a deployment, select a prior `build-...` tag from the package
+or use its `ghcr.io/skulldorom/openhands-agent@sha256:...` digest, then recreate
+the conversation container. The workflow never reuses rollback tags. Automatic
+publication updates GHCR, while pulling a new image and recreating containers
+remain deployment actions.
+
+## Troubleshooting
+
+Open the failed **OpenHands image** run in GitHub Actions and inspect the
+failing step. An upstream startup-contract or Debian compatibility error
+requires updating the wrapper or the package install for the new upstream
+image. A stale-source or upstream error can be retried with a fresh dispatch on
+`main`. A GHCR error warrants checking package visibility and this repository's
+Actions access. Failed build, smoke test and scan steps leave the previous
+`latest` available.
+
+To run the Git checks without starting Agent Server, use
+`bash tests/test-git-identity.sh`. To build locally, resolve upstream with
+`skopeo inspect --raw docker://ghcr.io/openhands/agent-server:latest-python`,
+hash that manifest with `sha256sum`, and pass
+`--build-arg UPSTREAM_IMAGE=ghcr.io/openhands/agent-server@sha256:<digest>`
+to `docker build`. Run `tests/test-agent-startup.sh` and
+`tests/test-postgresql.sh` with your local image tag.

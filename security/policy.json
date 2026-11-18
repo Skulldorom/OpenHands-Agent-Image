@@ -1,8 +1,0 @@
-{
-  "schema": 2,
-  "owner": "Skulldorom/OpenHands-Agent-Image maintainers",
-  "baseline": "ghcr.io/openhands/agent-server",
-  "scanner_version": "0.69.3",
-  "block_severities": ["HIGH", "CRITICAL"],
-  "emergency_blocks": []
-}

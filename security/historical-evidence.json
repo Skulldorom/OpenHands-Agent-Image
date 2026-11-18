@@ -1,7 +1,0 @@
-{
-  "run_id": 43876785488,
-  "attempt": 1,
-  "candidate": "ghcr.io/skulldorom/openhands-agent@sha256:0e8e24ac5258ae9d709886fc3298cb1f028b25146e4c01389056c1fa762e81a0",
-  "source_commit": "fb004d9a2aac6d83d99f0abbfaf7f8d72c6ad951",
-  "artifact_sha256": "sha256:ada30d96ee767206ea1dc00114b0a629a161d30799543f881d763c7381cc8899"
-}

@@ -13,16 +13,22 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567
         with:
           version: v0.69.3
           cache: false
-      - name: Scan exact historical candidate and its actual base
+      - name: Build immutable current-source audit candidate on runner loopback
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: scripts/prepare-security-candidate.sh "$SOURCE_SHA"
+      - name: Validate Git PostgreSQL API and signals of the exact audit candidate
+        run: scripts/validate-image.sh "$(cat candidate-ref.txt)"
+      - name: Scan exact current-source candidate and its actual base
         shell: bash
         run: |
-          candidate=$(jq -r .candidate security/historical-evidence.json)
-          docker pull "$candidate"
+          candidate=$(cat candidate-ref.txt)
           upstream=$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.base.digest" }}' "$candidate")
           [[ "$upstream" =~ ^sha256:[a-f0-9]{64}$ ]]
           printf '%s\n' "$upstream" > upstream-digest.txt
@@ -33,7 +39,7 @@ jobs:
           for target in candidate upstream; do
             ref="$candidate"
             if [[ "$target" == upstream ]]; then ref="ghcr.io/openhands/agent-server@$upstream"; fi
-            trivy image --cache-dir .cache/trivy --skip-db-update --skip-java-db-update \
+            trivy image --image-src docker --cache-dir .cache/trivy --skip-db-update --skip-java-db-update \
               --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
               --ignorefile /dev/null --ignore-unfixed=false --list-all-pkgs \
               --format json --output "$target-trivy.json" --timeout 20m "$ref"
@@ -46,9 +52,9 @@ jobs:
             --upstream-ref "ghcr.io/openhands/agent-server@$upstream" --report-only > security-summary.txt
           cat security-summary.txt
           cat security-summary.txt >> "$GITHUB_STEP_SUMMARY"
-      - name: Inspect every saved layer of the exact retained candidate
+      - name: Inspect every saved layer of the exact current-source candidate
         run: |
-          candidate=$(jq -r .candidate security/historical-evidence.json)
+          candidate=$(cat candidate-ref.txt)
           timeout 30m python3 tests/test-image-layers.py "$candidate"
       - name: Require exact-upstream custom security policy
         if: always()
@@ -64,7 +70,7 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck="$(go env GOPATH)/bin/govulncheck"
           "$govulncheck" -version > govulncheck-version.txt
-          candidate=$(jq -r .candidate security/historical-evidence.json)
+          candidate=$(cat candidate-ref.txt)
           cid=$(docker create "$candidate")
           trap 'docker rm "$cid" >/dev/null' EXIT
           mkdir -p reachability
@@ -83,7 +89,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          candidate=$(jq -r .candidate security/historical-evidence.json)
+          candidate=$(cat candidate-ref.txt)
           docker run --rm -i --read-only --network none --cap-drop ALL --security-opt no-new-privileges \
             --entrypoint /bin/sh "$candidate" -s > os-reachability.txt <<'SH'
           set -eu
@@ -109,6 +115,8 @@ jobs:
             reachability/
             high-critical-inventory.json
             high-critical-inventory.md
+            candidate-ref.txt
+            candidate-image-identity.json
             candidate-trivy.json
             layer-classifications.json
             security/credential-policy.json
@@ -135,3 +143,6 @@ jobs:
             reachability/
             high-critical-inventory.json
             high-critical-inventory.md
+      - name: Remove runner-local audit registry
+        if: always()
+        run: docker rm -f pr-security-registry >/dev/null 2>&1 || true

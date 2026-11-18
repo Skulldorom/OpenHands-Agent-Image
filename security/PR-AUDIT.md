@@ -13,10 +13,12 @@ The [complete accepted inventory](credential-baseline.json) commits all 19 findi
 - All 14 public key classifications retain complete payload, type, file and layer scope. Moving/copying a key into a new layer is not exempted.
 - The publisher rederives the complete comparison and gate from sealed evidence; missing, stale, count-inconsistent or altered evidence fails closed.
 
+The audit now builds and functionally validates the current source, gives it a real immutable manifest digest in a runner-local loopback registry, and scans that exact image. The old retained candidate uses a different upstream (`e74009…`) and is not accepted as the reviewed `6a0fe4…` baseline. No production registry is written.
+
 The vulnerability policy remains unchanged: inherited HIGH/CRITICAL findings stay visible; introduced HIGH/CRITICAL, material worsening and emergency matches block. Main/manual fresh builds, scheduled change detection, compatibility/provenance, immutable releases and interrupted-publication recovery are unchanged.
 
 ## Validation and limits
 
-152 Python regressions passed locally, including actual archive/scanner tests and publisher acceptance/rejection tests. Hosted lint, Docker integration and fresh security audits are rerun on the final source; see PR #1 for the final run URLs and results. A replay of the verified prior hosted inventory passes the revised gate with five accepted inherited unknowns and zero introduced findings.
+153 Python regressions passed locally, including actual archive/scanner tests and publisher acceptance/rejection tests. Hosted lint, Docker integration and fresh security audits are rerun on the final source; see PR #1 for the final run URLs and results. A replay of the verified prior hosted inventory passes the revised gate with five accepted inherited unknowns and zero introduced findings.
 
 Keep PR #1 draft. No merge, main change, production image publication or live LXC change was performed. Production GitHub/GHCR publication/recovery remains untested end to end; only Agent Server 1.62.0 is compatibility-approved. Actual publication requires every fresh production release gate, independently of a merge-readiness verdict.

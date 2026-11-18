@@ -119,6 +119,46 @@ class WorkflowPolicyTests(unittest.TestCase):
                 self.assertEqual(result.returncode == 0, upstream == candidate == 0)
                 self.assertEqual(calls.read_text().splitlines(), ['local-pr-validation upstream-fixture'])
 
+    def test_audit_candidate_helper_uses_only_loopback_and_verifies_source_and_digest(self):
+        helper = Path('scripts/prepare-security-candidate.sh').resolve()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fakebin = root/'bin'
+            fakebin.mkdir()
+            (root/'Dockerfile').write_text('ARG UPSTREAM_IMAGE=ghcr.io/openhands/agent-server@sha256:'+'b'*64+'\n')
+            (fakebin/'git').write_text('#!/bin/sh\nif [ "$1" = rev-parse ]; then printf "%s\\n" "$EXPECTED_SOURCE"; fi\n')
+            (fakebin/'curl').write_text('#!/bin/sh\nexit 0\n')
+            (fakebin/'docker').write_text('''#!/usr/bin/env python3
+import json,os,sys
+with open(os.environ['CALLS'],'a') as log: log.write(json.dumps(sys.argv[1:])+'\\n')
+if sys.argv[1]=='inspect': print(os.environ['DOCKER_METADATA'])
+''')
+            for path in fakebin.iterdir(): path.chmod(0o755)
+            valid = dict(RepoDigests=['127.0.0.1:5000/openhands-pr-security@sha256:'+'c'*64],
+                         Id='sha256:'+'d'*64, Config=dict(Labels={
+                             'org.opencontainers.image.revision':'a'*40,
+                             'org.opencontainers.image.base.digest':'sha256:'+'b'*64}))
+            for source, metadata, success in [('a'*40, valid, True), ('e'*40, valid, False),
+                ('a'*40, dict(valid, RepoDigests=['ghcr.io/production/image@sha256:'+'c'*64]), False)]:
+                calls=root/'calls'
+                calls.write_text('')
+                env=dict(os.environ, PATH=str(fakebin)+':'+os.environ['PATH'], EXPECTED_SOURCE='a'*40,
+                         CALLS=str(calls), DOCKER_METADATA=json.dumps([metadata]))
+                result=subprocess.run(['bash',str(helper),source],cwd=root,env=env,capture_output=True,text=True)
+                self.assertEqual(result.returncode==0,success,result.stderr)
+                recorded=[json.loads(line) for line in calls.read_text().splitlines()]
+                pushes=[cmd for cmd in recorded if cmd[0]=='push']
+                self.assertTrue(all(cmd[1]=='127.0.0.1:5000/openhands-pr-security:'+'a'*40 for cmd in pushes))
+                if success:
+                    self.assertEqual(len(pushes),1)
+                    identity=json.loads((root/'candidate-image-identity.json').read_text())
+                    self.assertEqual(identity['source_commit'],'a'*40)
+                    self.assertEqual(identity['candidate'],valid['RepoDigests'][0])
+                    self.assertEqual((root/'candidate-ref.txt').read_text().strip(),identity['candidate'])
+                    registry=[cmd for cmd in recorded if cmd[0]=='run'][0]
+                    self.assertIn('127.0.0.1:5000:5000',registry)
+                if source!='a'*40:self.assertEqual(recorded,[])
+
     def test_automatic_publisher_is_gated_and_never_rebuilds(self):
         workflow = yaml.safe_load(Path('.github/workflows/release.yml').read_text())
         publisher = workflow['jobs']['publish']

@@ -19,7 +19,7 @@ for ((attempt=0; attempt<60; attempt++)); do
     sleep 2
 done
 [[ "$ready" == true ]] || { echo 'Agent Server did not become ready' >&2; exit 1; }
-processes=$(docker top "$cid" -eo comm)
+processes=$(docker top "$cid" -eo pid,comm | awk 'NR > 1 {print $2}')
 grep -qx tini <<< "$processes"
 if grep -Exq 'postgres|postmaster' <<< "$processes"; then
     echo 'PostgreSQL started with the agent' >&2

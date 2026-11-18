@@ -1,5 +1,10 @@
 # OpenHands Agent Image
 
+[![CI](https://github.com/Skulldorom/OpenHands-Agent-Image/actions/workflows/image.yml/badge.svg?branch=main)](https://github.com/Skulldorom/OpenHands-Agent-Image/actions/workflows/image.yml)
+[![Image: latest](https://img.shields.io/badge/GHCR-latest-blue?logo=docker&logoColor=white)](https://github.com/Skulldorom/OpenHands-Agent-Image/pkgs/container/openhands-agent)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/skulldorom)
+
 `ghcr.io/skulldorom/openhands-agent:latest` extends the official
 `ghcr.io/openhands/agent-server:latest-python` image with runtime Git identity
 configuration and PostgreSQL 17 server and client tools. The published image
@@ -53,10 +58,10 @@ Starting Agent Server leaves PostgreSQL stopped.
 
 A reusable OpenHands skill is available at
 [`skills/postgresql-integration/SKILL.md`](skills/postgresql-integration/SKILL.md).
-It guides an agent through safe, real PostgreSQL integration tests using a
-**host-provisioned, conversation-specific test database**. The skill is optional:
-copying it into OpenHands does not provision the database or expose host services
-to Docker conversations.
+It guides the agent through starting a disposable PostgreSQL 17 cluster inside
+the Docker conversation, running the project's integration tests over a private
+Unix socket, and stopping and removing the cluster afterward. A verified
+project-provided test database can also be used.
 
 ### Install on an OpenHands host
 
@@ -91,16 +96,9 @@ user-home skill path. Do not assume the host's `/root` is mounted inside
 conversation containers. Check the actual container user and `HOME`, and
 validate discovery in a newly created conversation.
 
-This skill expects a host-managed PostgreSQL test service and an independently
-verified per-conversation database, typically supplied through
-`/tmp/openhands-postgres.env`. That file must be provisioned at runtime, never
-committed or baked into an image. The example `172.17.0.1:55432` endpoint is
-deployment-specific. If provisioning or isolation cannot be verified, the agent
-must stop before running database-changing tests.
-
-The image also contains PostgreSQL 17 server and client binaries, but this
-skill favors the existing provisioned test database rather than starting a
-second server. Installing the skill does not change the image's default startup.
+The agent starts PostgreSQL on demand as the unprivileged container user using
+the image's bundled tools. Installing the skill leaves Agent Server's startup
+behavior unchanged.
 
 ## Builds and updates
 

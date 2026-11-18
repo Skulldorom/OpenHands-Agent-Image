@@ -49,6 +49,59 @@ directory with `initdb -D <data-dir>` and start it explicitly with
 exposing any listener. Mount storage for data that must outlive the container.
 Starting Agent Server leaves PostgreSQL stopped.
 
+## PostgreSQL integration testing skill
+
+A reusable OpenHands skill is available at
+[`skills/postgresql-integration/SKILL.md`](skills/postgresql-integration/SKILL.md).
+It guides an agent through safe, real PostgreSQL integration tests using a
+**host-provisioned, conversation-specific test database**. The skill is optional:
+copying it into OpenHands does not provision the database or expose host services
+to Docker conversations.
+
+### Install on an OpenHands host
+
+For an OpenHands installation running as `root`, the requested global skill path is:
+
+```text
+/root/.openhands/skills/postgresql-integration/SKILL.md
+```
+
+After cloning this repository on the OpenHands host, run:
+
+```sh
+sudo install -d -m 0755 /root/.openhands/skills/postgresql-integration
+sudo install -m 0644 skills/postgresql-integration/SKILL.md \
+  /root/.openhands/skills/postgresql-integration/SKILL.md
+```
+
+For a different OpenHands process user, install under *that user's* home
+directory instead: `~/.openhands/skills/postgresql-integration/SKILL.md`.
+The file must be accessible to the process that discovers skills. Restart
+OpenHands or start a fresh conversation after installation, and verify the
+skill appears in the available skills list before relying on it.
+
+### Docker conversation runtimes
+
+**Host and conversation-container filesystems are separate.** Installing under
+`/root/.openhands/skills/` on the LXC host does not automatically install the
+skill inside an isolated Docker conversation container. Ensure the Agent Server
+that loads skills can see it, using a supported runtime mount/skill sync
+mechanism or by baking it into the conversation image at the appropriate
+user-home skill path. Do not assume the host's `/root` is mounted inside
+conversation containers. Check the actual container user and `HOME`, and
+validate discovery in a newly created conversation.
+
+This skill expects a host-managed PostgreSQL test service and an independently
+verified per-conversation database, typically supplied through
+`/tmp/openhands-postgres.env`. That file must be provisioned at runtime, never
+committed or baked into an image. The example `172.17.0.1:55432` endpoint is
+deployment-specific. If provisioning or isolation cannot be verified, the agent
+must stop before running database-changing tests.
+
+The image also contains PostgreSQL 17 server and client binaries, but this
+skill favors the existing provisioned test database rather than starting a
+second server. Installing the skill does not change the image's default startup.
+
 ## Builds and updates
 
 | Trigger | What happens |

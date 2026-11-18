@@ -38,7 +38,7 @@ If provisioning is absent, report it and stop; never invent credentials or attem
 1. Require nonempty `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD`.
 2. Require database and role names to follow the provisioned `oh_` convention; reject `postgres`, `template0`, `template1`, and any known production or shared database.
 3. Confirm the endpoint, database, and role match the **trusted host-provisioned configuration**. Do not treat the name prefix or credentials-file contents alone as proof of isolation. The expected network endpoint can vary by deployment.
-4. Check connectivity and authenticate with the provided settings, e.g. `psql -X -w -v ON_ERROR_STOP=1 -Atqc 'SELECT current_database(), current_user, current_setting(''server_version'');'` after verification.
+4. Check connectivity and authenticate with the provided settings, e.g. `psql -X -w -v ON_ERROR_STOP=1 -Atqc 'SELECT current_database(), current_user, version();'` after verification.
 5. Stop if the target cannot be independently established as the conversation's isolated test database.
 
 Do not run migrations, schema changes, cleanup, or tests that mutate data until verification succeeds.

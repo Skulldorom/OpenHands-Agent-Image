@@ -1,21 +1,22 @@
-# PR #1 audit — credential policy follow-up
+# PR #1 audit — upstream-relative credential gate
 
-The official OpenHands vulnerability baseline remains unchanged. Inherited HIGH/CRITICAL findings remain visible without individual approvals. Introduced HIGH/CRITICAL findings, material worsening, emergency blocks, unclassified credentials and invalid evidence remain blocking. Main/manual fresh builds, scheduled change detection, signed provenance, immutable versioning and interrupted-publication recovery remain in place.
+The owner explicitly accepted the risk of the five unchanged, unclassified official-upstream token-shaped findings on 18 November 2026. This is a baseline-risk decision, not proof of harmlessness. There are no per-token approvals or expiry exceptions.
 
-## Credential result
+The [complete accepted inventory](credential-baseline.json) commits all 19 findings from the exact authenticated upstream scan: 14 individually verified public test keys and five unknown token-shaped findings. [The investigation](CREDENTIAL-LAYER-INVESTIGATION.md) retains the locations, hashes, source evidence and limitations. Raw values/private-key payloads are never included.
 
-The [complete six-location investigation](CREDENTIAL-LAYER-INVESTIGATION.md) and [policy](credential-policy.json) replace the previous token-fingerprint exemptions. SSH2, httpolyglot and GnuTLS contain 14 individually verified public cryptographic test private keys. Full material hashes, types, lengths, immutable source citations and purpose establish their classification. No file, binary or directory is skipped.
+## Gate behavior
 
-Five token-shaped matches remain unclassified: three Copilot runtime matches (including the two previously exempted), one GitHub CLI OAuth-shaped match and one bundled Codex PAT-shaped match. Their binary location, upstream inheritance and apparent age alone do not prove safety. Reproducible source/compiler-boundary evidence or reliable proof of authentic token type and expiration is still required. No matched value or sensitive context is included in evidence.
+- Every regular file and historical layer in both exact images is scanned. Layer hashes, RootFS completeness/prefix and full finding identities are verified.
+- The five unchanged inherited unknowns remain transparently unclassified and can pass the credential gate under the reviewed baseline.
+- Any introduced/changed custom finding, missing inherited evidence, changed upstream image digest or changed upstream finding inventory blocks. Baseline changes require review; automation cannot silently adopt them.
+- Confirmed dangerous credentials and exposed private-key/credential-file material always block, including inherited findings. The denylist only blocks and never authorizes risk.
+- All 14 public key classifications retain complete payload, type, file and layer scope. Moving/copying a key into a new layer is not exempted.
+- The publisher rederives the complete comparison and gate from sealed evidence; missing, stale, count-inconsistent or altered evidence fails closed.
 
-The scanner compares exact upstream/candidate saved-layer inventories, verifies layer hashes and completeness against Docker RootFS inventories, and preserves historical-layer inspection. The publisher checks report freshness, source-bound policy hash, full classifications and recomputed comparison. Public fixtures can pass; unknown/live secrets remain blocking regardless of inheritance.
+The vulnerability policy remains unchanged: inherited HIGH/CRITICAL findings stay visible; introduced HIGH/CRITICAL, material worsening and emergency matches block. Main/manual fresh builds, scheduled change detection, compatibility/provenance, immutable releases and interrupted-publication recovery are unchanged.
 
-## Validation scope
+## Validation and limits
 
-145 local Python regressions passed, including actual scanner/archive tests and publisher gates. Python/shell syntax and diff checks passed. Hosted policy/lint, Docker Git identity, PostgreSQL 17, Agent API/signals and exact retained-candidate security audit are rerun on the final source. See PR #1 for final hosted run URLs and results; local results do not substitute for hosted Docker validation.
+152 Python regressions passed locally, including actual archive/scanner tests and publisher acceptance/rejection tests. Hosted lint, Docker integration and fresh security audits are rerun on the final source; see PR #1 for the final run URLs and results. A replay of the verified prior hosted inventory passes the revised gate with five accepted inherited unknowns and zero introduced findings.
 
-The full PR diff against main includes vulnerability reporting, release orchestration, provenance, CI and tests. The current credential changes preserve the vulnerability policy and publication conditions. Existing unsuppressed inventories remain historical evidence; current releases require fresh assessment.
-
-## Verdict
-
-**BLOCKED** while five token-shaped matches remain unclassified. Keep draft; v1.0.0 and latest promotion are ineligible overall. Production publication/recovery remains untested end to end. Only Agent Server 1.62.0 is compatibility-approved. No merge, main modification, production publication or live LXC change was performed.
+Keep PR #1 draft. No merge, main change, production image publication or live LXC change was performed. Production GitHub/GHCR publication/recovery remains untested end to end; only Agent Server 1.62.0 is compatibility-approved. Actual publication requires every fresh production release gate, independently of a merge-readiness verdict.

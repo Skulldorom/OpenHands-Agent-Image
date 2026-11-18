@@ -31,19 +31,12 @@ def normalize(raw):
 
 
 def credential_classification(record, now, policy=None):
-    """Reproduce a decision from metadata; unknowns never receive a waiver."""
+    """Reproduce a decision from metadata; public test material keeps its narrow source scope."""
     policy = policy or json.loads(POLICY_PATH.read_text())
     if record["credential_rule"] == "private_key":
         for fixture in policy["public_private_keys"]:
             if all(record.get(k) == fixture[k] for k in ("kind", "payload_sha256", "payload_length", "diff_id", "file")):
                 return {"classification": "public-cryptographic-test-material", **fixture}
-    if (record["credential_rule"] == "github_token" and record.get("token_family") == "ghs_"
-            and record.get("match_length") == 40 and record.get("standalone") is True):
-        for observation in policy["layer_observations"]:
-            expiry = datetime.fromisoformat(observation["observed_before"]) + timedelta(hours=1)
-            if record.get("diff_id") == observation["diff_id"] and now >= expiry:
-                return {"classification": "expired-legacy-installation-token", **observation,
-                        "maximum_lifetime_seconds": 3600}
     return None
 
 
@@ -177,7 +170,7 @@ def check_layers(stream, classified=None, policy=None, inspected=None):
                     while name.startswith("./"):
                         name = name[2:]
                     if name in {"etc/ssl/private/ssl-cert-snakeoil.key", "etc/ssl/certs/ssl-cert-snakeoil.pem"}:
-                        raise AssertionError(f"Snakeoil material recoverable in layer {count}: {name}")
+                        errors.append({"layer": count, "file": name, "rule": "snakeoil", "archive_member": member.name, "patterns": []})
                     if entry.isfile():
                         protected = ("/.git-credentials", "/.ssh/id_rsa", "/.ssh/id_ed25519", "/.aws/credentials", "/.docker/config.json", "/.env")
                         credential_file = any(name == suffix.lstrip("/") or name.endswith(suffix) for suffix in protected)
@@ -224,8 +217,18 @@ def scan_image(ref):
             process.wait(timeout=30)
 
 
+IDENTITY_FIELDS = ("archive_member", "file", "credential_rule", "match_sha256", "match_length",
+                   "file_offset", "token_family", "kind", "payload_sha256", "payload_length")
+
+
 def finding_identity(row):
-    return (row["archive_member"], row["file"], row["credential_rule"], row["match_sha256"])
+    # The verified layer hash + member path bind the entire file, including bytes
+    # outside the detected span. A changed file/layer is never inherited by guess.
+    return tuple(row.get(k) for k in IDENTITY_FIELDS)
+
+
+def finding_fingerprint(row):
+    return hashlib.sha256(json.dumps(finding_identity(row), separators=(",", ":")).encode()).hexdigest()
 
 
 def flatten(report):
@@ -236,14 +239,89 @@ def flatten(report):
     return result
 
 
-def compare_findings(upstream, candidate):
+def inventory_fingerprint(report):
+    identities = sorted(json.dumps(finding_identity(row), separators=(",", ":")) for row in flatten(report))
+    return hashlib.sha256(json.dumps(identities, separators=(",", ":")).encode()).hexdigest()
+
+
+def confirmed_dangerous(row, policy):
+    return any(finding_fingerprint(row) == item["finding_sha256"] for item in policy["confirmed_dangerous"])
+
+
+def compare_findings(upstream, candidate, policy=None):
+    policy = policy if policy is not None else json.loads(POLICY_PATH.read_text())
     before = {finding_identity(r): r for r in flatten(upstream)}
     after = {finding_identity(r): r for r in flatten(candidate)}
-    return {"inherited_non_sensitive": [r for k, r in after.items() if k in before and r["status"] == "non-sensitive"],
-            "inherited_confirmed_credentials": [],  # This offline scanner cannot establish live authentication.
-            "inherited_unclassified": [r for k, r in after.items() if k in before and r["status"] == "unclassified"],
+    return {"inherited_non_sensitive": [r for k, r in after.items() if k in before and r["status"] == "non-sensitive" and not confirmed_dangerous(r, policy)],
+            "inherited_confirmed_credentials": [r for k, r in after.items() if k in before and confirmed_dangerous(r, policy)],
+            "inherited_unclassified": [r for k, r in after.items() if k in before and r["status"] == "unclassified" and not confirmed_dangerous(r, policy)],
             "introduced": [r for k, r in after.items() if k not in before],
             "removed": [r for k, r in before.items() if k not in after]}
+
+
+def validate_inventory(scan, now, policy):
+    assert type(scan["layers"]) is int and scan["layers"] > 0
+    assert len(scan["layer_diff_ids"]) == scan["layers"]
+    assert len(set(scan["layer_diff_ids"])) == scan["layers"], "Duplicate saved layers"
+    assert all(re.fullmatch(r"sha256:[a-f0-9]{64}", d) for d in scan["layer_diff_ids"])
+    assert type(scan["unclassified_detections"]) is int
+    assert scan["unclassified_detections"] == sum(max(1, len(r["patterns"])) for r in scan["unclassified_findings"]), "Detection count mismatch"
+    rows = flatten(scan)
+    assert len({finding_identity(r) for r in rows}) == len(rows), "Duplicate finding evidence"
+    for row in rows:
+        assert isinstance(row["file"], str) and row["file"] and not row["file"].startswith("/")
+        assert row["archive_member"].startswith("blobs/sha256/")
+        diff_id = "sha256:" + row["archive_member"].split("/")[-1]
+        assert diff_id in scan["layer_diff_ids"], "Finding layer missing from inventory"
+        if row["match_sha256"] is not None:
+            assert re.fullmatch(r"[a-f0-9]{64}", row["match_sha256"])
+            assert type(row["match_length"]) is int and row["match_length"] > 0
+            assert row["diff_id"] == diff_id, "Finding layer evidence mismatch"
+        else:
+            assert row["credential_rule"] in {"credential_file", "snakeoil"}, "Missing finding fingerprint"
+        if row["status"] == "non-sensitive":
+            assert credential_classification(row, now, policy) == row["decision"], "Unknown public-material classification"
+        else:
+            assert "decision" not in row, "Unclassified finding carries a classification"
+    return rows
+
+
+def credential_gate(upstream, candidate, now=None, policy=None):
+    """One reviewed upstream inventory; no per-token approvals or safety claims."""
+    now = now or datetime.now(timezone.utc)
+    policy = policy if policy is not None else json.loads(POLICY_PATH.read_text())
+    assert policy["schema"] == 2 and set(policy) == {"schema", "public_private_keys", "accepted_upstream", "confirmed_dangerous"}
+    accepted = policy["accepted_upstream"]
+    assert set(accepted) == {"upstream", "inventory_sha256", "finding_count", "decision", "evidence"}
+    assert re.fullmatch(r"ghcr.io/openhands/agent-server@sha256:[a-f0-9]{64}", accepted["upstream"])
+    assert re.fullmatch(r"[a-f0-9]{64}", accepted["inventory_sha256"])
+    assert type(accepted["finding_count"]) is int and accepted["finding_count"] >= 0
+    assert accepted["decision"] == "accept-unchanged-unclassified-upstream-risk"
+    assert accepted["evidence"].startswith("https://github.com/")
+    for item in policy["confirmed_dangerous"]:
+        assert set(item) == {"finding_sha256", "reason", "evidence"}
+        assert re.fullmatch(r"[a-f0-9]{64}", item["finding_sha256"])
+        assert item["reason"].strip() and item["evidence"].startswith("https://")
+    before = validate_inventory(upstream, now, policy)
+    after = validate_inventory(candidate, now, policy)
+    assert set(upstream["layer_diff_ids"]) <= set(candidate["layer_diff_ids"]), "Upstream layer inventory changed"
+    comparison = compare_findings(upstream, candidate, policy)
+    baseline_changed = (upstream["candidate"] != accepted["upstream"] or
+                        inventory_fingerprint(upstream) != accepted["inventory_sha256"] or
+                        len(before) != accepted["finding_count"])
+    dangerous = [r for r in before + after if confirmed_dangerous(r, policy) or
+                 (r["status"] != "non-sensitive" and r["credential_rule"] in {"private_key", "credential_file", "snakeoil"})]
+    reasons = []
+    if baseline_changed:
+        reasons.append("Official credential baseline changed; review upstream digest and complete finding inventory")
+    if comparison["introduced"]:
+        reasons.append("Credential findings introduced or materially changed by customization")
+    if comparison["removed"]:
+        reasons.append("Inherited historical finding evidence missing from candidate")
+    if dangerous:
+        reasons.append("Confirmed dangerous credential or exposed private-key/credential-file material")
+    return {"pass": not reasons, "baseline_changed": baseline_changed, "blockers": reasons,
+            "dangerous_findings": dangerous, "accepted_inherited_unclassified": len(comparison["inherited_unclassified"]) if not baseline_changed else 0}
 
 
 if __name__ == "__main__":
@@ -262,9 +340,11 @@ if __name__ == "__main__":
     assert set(before["layer_diff_ids"]) == set(base), "Incomplete upstream archive"
     assert set(after["layer_diff_ids"]) == set(custom), "Incomplete candidate archive"
     image_id = json.loads(subprocess.check_output(["docker", "inspect", candidate]))[0]["Id"]
-    report = {**after, "image_id": image_id, "schema": 2, "upstream": before, "comparison": compare_findings(before, after),
+    report = {**after, "image_id": image_id, "schema": 3, "upstream": before, "comparison": compare_findings(before, after),
+              "gate": credential_gate(before, after),
               "scanned_at": datetime.now(timezone.utc).isoformat(),
               "policy_sha256": hashlib.sha256(POLICY_PATH.read_bytes()).hexdigest()}
     Path("layer-classifications.json").write_text(json.dumps(report, indent=2)+"\n")
     print(json.dumps({k: len(v) for k, v in report["comparison"].items()}))
-    assert after["unclassified_detections"] == 0, "Unclassified credentials remain blocking; see metadata report"
+    assert report["gate"]["pass"], "; ".join(report["gate"]["blockers"])
+    print("Credential gate: PASS; unchanged unclassified upstream findings remain accepted risk, not verified harmless")

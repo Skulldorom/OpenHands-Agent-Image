@@ -11,6 +11,7 @@ from contextlib import redirect_stdout
 from datetime import timedelta
 from unittest.mock import patch
 import hashlib
+from pathlib import Path
 
 spec = importlib.util.spec_from_file_location('layers', 'tests/test-image-layers.py')
 layers = importlib.util.module_from_spec(spec)
@@ -51,6 +52,15 @@ class LayerTests(unittest.TestCase):
                     report = layers.scan_image('immutable-fixture')
                     self.assertEqual(report['unclassified_detections'], 1)
                     self.assertEqual(report['unclassified_findings'][0]['patterns'][0]['credential_rule'], 'github_token')
+
+    def test_accepted_complete_inventory_is_not_an_individual_token_waiver(self):
+        original = json.loads(Path('security/credential-baseline.json').read_text())
+        policy = json.loads(layers.POLICY_PATH.read_text())
+        identities = sorted(json.dumps(tuple(row[k] for k in layers.IDENTITY_FIELDS), separators=(',', ':')) for row in original['findings'])
+        digest = hashlib.sha256(json.dumps(identities, separators=(',', ':')).encode()).hexdigest()
+        self.assertEqual(digest, policy['accepted_upstream']['inventory_sha256'])
+        self.assertEqual(len(original['findings']), 19)
+        self.assertEqual(len(policy['public_private_keys']), 14)
 
     def test_normal_files(self):
         self.assertEqual(layers.check_layers(io.BytesIO(archive({'old/layer.tar': archive({'app/source.py': b'print(1)'})}))), 1)
@@ -156,27 +166,12 @@ class LayerTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             self.assertEqual(layers.scan_file(io.BytesIO(value), chunk_size=17), 'github_installation')
 
-    def test_expiry_requires_legacy_type_exact_observed_layer_and_time(self):
-        from datetime import datetime, timezone
-        policy = json.loads(layers.POLICY_PATH.read_text())
-        observation = policy['layer_observations'][0]
-        now = datetime.fromisoformat(observation['observed_before']) + timedelta(hours=2)
-        row = dict(credential_rule='github_token', token_family='ghs_', match_length=40,
-                   standalone=True, diff_id=observation['diff_id'])
-        self.assertIsNotNone(layers.credential_classification(row, now))
-        for field, value in [('credential_rule', 'github_installation'), ('token_family', 'ghp_'),
-                             ('match_length', 51), ('standalone', False), ('diff_id', 'sha256:'+'a'*64)]:
-            self.assertIsNone(layers.credential_classification(dict(row, **{field: value}), now))
-        self.assertIsNone(layers.credential_classification(row, now-timedelta(hours=2)))
-
-    def test_classified_literal_never_exempts_other_tokens_in_same_file(self):
-        fixture = b'ghs_' + b'Q2'*18
-        observation = json.loads(layers.POLICY_PATH.read_text())['layer_observations'][0]
+    def test_token_age_does_not_create_per_token_classifications(self):
+        value = b'ghs_' + b'Q2'*18
         records = []
         with redirect_stdout(io.StringIO()):
-            self.assertEqual(layers.scan_file(io.BytesIO(fixture + b'\x00ghp_' + b'Z'*36),
-                diff_id=observation['diff_id'], classified=records), 'github_token')
-        self.assertEqual(len(records), 1)
+            self.assertEqual(layers.scan_file(io.BytesIO(value), classified=records), 'github_token')
+        self.assertEqual(records, [])
 
     def test_public_private_key_uses_complete_material_and_continues_scanning(self):
         value = subprocess.check_output(['openssl', 'genpkey', '-algorithm', 'EC',
@@ -184,7 +179,7 @@ class LayerTests(unittest.TestCase):
         match = layers.CREDENTIAL.search(value)
         material, _ = layers.pem_material(value, match)
         policy = {'public_private_keys': [dict(material, diff_id='sha256:'+'a'*64, file='test/source', source='https://example.invalid/public-fixture',
-                   purpose='Synthetic public-fixture classification test')], 'layer_observations': []}
+                   purpose='Synthetic public-fixture classification test')], 'confirmed_dangerous': []}
         for suffix, expected in [(b'', None), (b'\x00ghp_'+b'A'*36, 'github_token'),
                                  (b'\n-----BEGIN PRIVATE KEY-----\n'+b'B'*64, 'private_key')]:
             records = []
@@ -200,7 +195,7 @@ class LayerTests(unittest.TestCase):
         material, _ = layers.pem_material(value, layers.CREDENTIAL.search(value))
         fixture = dict(material, file='test/fixture', diff_id='sha256:'+'a'*64,
                        source='https://example.invalid/public', purpose='synthetic public test fixture')
-        policy = dict(public_private_keys=[fixture], layer_observations=[])
+        policy = dict(public_private_keys=[fixture], confirmed_dangerous=[])
         for file, diff_id, expected in [('test/fixture', fixture['diff_id'], None),
                                        ('etc/service.key', fixture['diff_id'], 'private_key'),
                                        ('test/fixture', 'sha256:'+'b'*64, 'private_key')]:
@@ -241,6 +236,86 @@ class LayerTests(unittest.TestCase):
         raw = b'\x00-----BEGIN PRIVATE KEY-----\x00' + b'ghp_' + b'Z' * 36
         with self.assertRaisesRegex(AssertionError, 'rule=github_token'):
             layers.check_layers(io.BytesIO(archive({'old/layer.tar': archive({'tmp/cache': raw})})))
+
+
+class BaselineGateTests(unittest.TestCase):
+    def scan(self, layer_files):
+        payloads = [archive(files) for files in layer_files]
+        saved = archive({'blobs/sha256/'+hashlib.sha256(p).hexdigest(): p for p in payloads})
+        classified, inspected = [], []
+        with redirect_stdout(io.StringIO()):
+            try:
+                count = layers.check_layers(io.BytesIO(saved), classified, inspected=inspected)
+                unknown = []
+            except layers.CredentialFindings as error:
+                count, unknown = error.layers, error.findings
+        return dict(candidate='ghcr.io/openhands/agent-server@sha256:'+'a'*64, layers=count,
+                    layer_diff_ids=inspected, classifications=classified, unclassified_findings=unknown,
+                    unclassified_detections=sum(max(1,len(r['patterns'])) for r in unknown))
+
+    def policy(self, upstream):
+        return dict(schema=2, public_private_keys=[], confirmed_dangerous=[], accepted_upstream=dict(
+            upstream=upstream['candidate'], inventory_sha256=layers.inventory_fingerprint(upstream),
+            finding_count=len(layers.flatten(upstream)), decision='accept-unchanged-unclassified-upstream-risk',
+            evidence='https://github.com/example/review'))
+
+    def test_unchanged_inherited_unknown_is_visible_and_passes(self):
+        scan = self.scan([{'usr/bin/vendor': b'\x00ghp_'+b'A'*36}])
+        gate = layers.credential_gate(scan, scan, policy=self.policy(scan))
+        self.assertTrue(gate['pass'])
+        self.assertEqual(gate['accepted_inherited_unclassified'], 1)
+        self.assertEqual(scan['unclassified_detections'], 1)
+        self.assertEqual(len(layers.compare_findings(scan, scan)['inherited_unclassified']), 1)
+
+    def test_introduced_and_changed_custom_credentials_block(self):
+        base_files = {'usr/bin/vendor': b'ghp_'+b'A'*36}
+        before = self.scan([base_files])
+        for filename, value in [('tmp/token', b'ghp_'+b'B'*36), ('usr/bin/vendor', b'ghp_'+b'C'*36)]:
+            candidate = self.scan([base_files, {filename:value}])
+            gate = layers.credential_gate(before, candidate, policy=self.policy(before))
+            self.assertFalse(gate['pass'])
+            self.assertTrue(any('customization' in r for r in gate['blockers']))
+
+    def test_new_changed_removed_or_relocated_upstream_findings_require_review(self):
+        before = self.scan([{'usr/bin/vendor': b'ghp_'+b'A'*36}])
+        for files in [{'usr/bin/vendor': b'ghp_'+b'B'*36},
+                      {'usr/bin/vendor': b'ghp_'+b'A'*36, 'tmp/other': b'gho_'+b'C'*36},
+                      {'usr/bin/vendor': b'normal'}, {'new/path': b'ghp_'+b'A'*36}]:
+            changed = self.scan([files])
+            gate = layers.credential_gate(changed, changed, policy=self.policy(before))
+            self.assertFalse(gate['pass'])
+            self.assertTrue(gate['baseline_changed'])
+        changed = dict(before, candidate='ghcr.io/openhands/agent-server@sha256:'+'b'*64)
+        self.assertTrue(layers.credential_gate(changed, changed, policy=self.policy(before))['baseline_changed'])
+
+    def test_confirmed_live_inherited_credential_overrides_baseline_acceptance(self):
+        scan = self.scan([{'usr/bin/vendor': b'ghp_'+b'A'*36}])
+        policy = self.policy(scan)
+        policy['confirmed_dangerous'] = [dict(finding_sha256=layers.finding_fingerprint(layers.flatten(scan)[0]),
+            reason='Confirmed live credential', evidence='https://github.com/example/security-review')]
+        gate = layers.credential_gate(scan, scan, policy=policy)
+        self.assertFalse(gate['pass'])
+        self.assertEqual(len(layers.compare_findings(scan, scan, policy)['inherited_confirmed_credentials']), 1)
+
+    def test_inherited_exposed_keys_and_credential_files_always_block(self):
+        for files in [{'tmp/key': b'-----BEGIN PRIVATE KEY-----\n'+b'M'*64},
+                      {'root/.git-credentials': b'https://user:password@example.invalid'},
+                      {'etc/ssl/private/ssl-cert-snakeoil.key': b'key'}]:
+            scan = self.scan([files])
+            gate = layers.credential_gate(scan, scan, policy=self.policy(scan))
+            self.assertFalse(gate['pass'])
+            self.assertTrue(gate['dangerous_findings'])
+
+    def test_invalid_inventory_evidence_fails_closed(self):
+        scan = self.scan([{'usr/bin/vendor': b'ghp_'+b'A'*36}])
+        for field, value in [('unclassified_detections', 0), ('layer_diff_ids', []), ('unclassified_findings', [])]:
+            broken = dict(scan, **{field:value})
+            with self.assertRaises(AssertionError):
+                layers.credential_gate(scan, broken, policy=self.policy(scan))
+        broken = json.loads(json.dumps(scan))
+        broken['unclassified_findings'][0]['patterns'][0]['diff_id'] = 'sha256:'+'b'*64
+        with self.assertRaises(AssertionError):
+            layers.credential_gate(scan, broken, policy=self.policy(scan))
 
 
 if __name__ == '__main__':

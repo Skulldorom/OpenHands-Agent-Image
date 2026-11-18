@@ -89,3 +89,5 @@ jobs:
           name: credential-layer-inventory
           path: |
             layer-classifications.json
+            security/credential-policy.json
+            security/credential-baseline.json

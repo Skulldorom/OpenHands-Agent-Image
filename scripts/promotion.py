@@ -18,7 +18,7 @@ import urllib.error
 import evidence
 import release
 
-SEALED_FILES = evidence.FILES | {"security-assessment.json", "security-assessment.md", "scanner-database.tar.gz", "security/policy.json", "upstream-baseline.json", "previous-upstream-trivy.json", "layer-classifications.json", "security/credential-policy.json"}
+SEALED_FILES = evidence.FILES | {"security-assessment.json", "security-assessment.md", "scanner-database.tar.gz", "security/policy.json", "upstream-baseline.json", "previous-upstream-trivy.json", "layer-classifications.json", "security/credential-policy.json", "security/credential-baseline.json"}
 
 def policy_hash():
     return hashlib.sha256(Path("security/policy.json").read_bytes()).hexdigest()
@@ -54,23 +54,26 @@ def validate_fresh_scans(selection, now):
         with archive.extractfile(matches[0]) as database:
             assert hashlib.file_digest(database, "sha256").hexdigest() == expected.split()[0], "Frozen scanner database changed"
 
-def validate_layer_report(digest, now, prepared_at=None):
-    report = json.loads(Path("layer-classifications.json").read_text())
-    assert set(report) == {"candidate", "layers", "unclassified_detections", "classifications",
-                           "unclassified_findings", "schema", "upstream", "comparison", "scanned_at", "policy_sha256", "layer_diff_ids", "image_id"}
-    assert report["schema"] == 2
-    assert re.fullmatch(r"sha256:[a-f0-9]{64}", report["image_id"])
-    assert report["candidate"] == release.IMAGE + "@" + digest, "Layer report candidate mismatch"
-    assert type(report["layers"]) is int and report["layers"] > 0
-    assert type(report["unclassified_detections"]) is int and report["unclassified_detections"] == 0
-    assert report["unclassified_findings"] == []
-    assert timedelta(0) <= now - datetime.fromisoformat(report["scanned_at"]) <= timedelta(hours=24), "Layer evidence expired"
-    if prepared_at is not None:
-        assert datetime.fromisoformat(prepared_at) <= datetime.fromisoformat(report["scanned_at"]), "Layer scan predates validation"
+def credential_module():
     source = Path(__file__).resolve().parents[1] / "tests/test-image-layers.py"
     spec = importlib.util.spec_from_file_location("credential_layers", source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def validate_layer_report(digest, now, prepared_at=None):
+    report = json.loads(Path("layer-classifications.json").read_text())
+    assert set(report) == {"candidate", "layers", "unclassified_detections", "classifications",
+                           "unclassified_findings", "schema", "upstream", "comparison", "scanned_at", "policy_sha256", "layer_diff_ids", "image_id", "gate"}
+    assert report["schema"] == 3
+    assert re.fullmatch(r"sha256:[a-f0-9]{64}", report["image_id"])
+    assert report["candidate"] == release.IMAGE + "@" + digest, "Layer report candidate mismatch"
+    assert type(report["layers"]) is int and report["layers"] > 0
+    assert timedelta(0) <= now - datetime.fromisoformat(report["scanned_at"]) <= timedelta(hours=24), "Layer evidence expired"
+    if prepared_at is not None:
+        assert datetime.fromisoformat(prepared_at) <= datetime.fromisoformat(report["scanned_at"]), "Layer scan predates validation"
+    module = credential_module()
     assert report["policy_sha256"] == hashlib.sha256(module.POLICY_PATH.read_bytes()).hexdigest(), "Credential policy changed"
     upstream = report["upstream"]
     expected_base = json.loads(Path("upstream-trivy.json").read_text())["ArtifactName"]
@@ -81,15 +84,9 @@ def validate_layer_report(digest, now, prepared_at=None):
         assert all(re.fullmatch(r"sha256:[a-f0-9]{64}", d) for d in scan["layer_diff_ids"])
     assert set(upstream["layer_diff_ids"]) <= set(report["layer_diff_ids"])
     assert report["comparison"] == module.compare_findings(upstream, report), "Credential comparison altered"
-    assert not report["comparison"]["inherited_unclassified"]
-    assert not report["comparison"]["inherited_confirmed_credentials"]
-    assert not any(r["status"] != "non-sensitive" for r in report["comparison"]["introduced"])
-    for scan in (upstream, report):
-        assert isinstance(scan["classifications"], list)
-        for record in scan["classifications"]:
-            assert record["diff_id"] in scan["layer_diff_ids"], "Classification layer missing from inventory"
-            assert record["archive_member"] == "blobs/sha256/" + record["diff_id"].split(":")[1]
-            assert module.credential_classification(record, now) == record["decision"], "Unknown credential classification"
+    gate = module.credential_gate(upstream, report, now)
+    assert report["gate"] == gate, "Credential gate evidence altered"
+    assert gate["pass"], "; ".join(gate["blockers"])
 
 
 def prepare(digest):
@@ -283,7 +280,9 @@ def release_notes(state, image=None):
     assessment = json.loads(Path("security-assessment.json").read_text())
     counts = assessment["comparison_counts"]
     new_upstream = assessment["new_upstream_findings"]
-    classifications = json.loads(Path("layer-classifications.json").read_text())["classifications"]
+    layer_report = json.loads(Path("layer-classifications.json").read_text())
+    classifications = layer_report["classifications"]
+    inherited_unknown = len(layer_report.get("comparison", {}).get("inherited_unclassified", []))
     summary = (f"Custom image security: {'PASS' if assessment['modification_pass'] else 'FAIL'}. "
                "Inherited upstream security: reported, not automatically blocked.\n"
                f"Candidate severity totals: {assessment['severity_counts']}; upstream: {assessment['upstream_severity_counts']}.\n"
@@ -292,7 +291,8 @@ def release_notes(state, image=None):
                f"Introduced HIGH/CRITICAL: {len(assessment['introduced_high_critical'])}; "
                f"new upstream findings: {len(new_upstream) if new_upstream is not None else 'first approved baseline not established'}; "
                f"emergency-blocked: {len(assessment['emergency_blocked'])}; secret detections: {len(assessment['secrets'])}. "
-               f"Classified non-sensitive credential findings: {len(classifications)} (details attached); unclassified layer detections: 0.")
+               f"Classified non-sensitive credential findings: {len(classifications)} (details attached); "
+               f"unchanged inherited unclassified findings: {inherited_unknown} (accepted upstream risk, not proven harmless).")
     return (f"Validated custom image: `{image or release.IMAGE}@{state['image_digest']}`\n"
             f"Official upstream: `ghcr.io/openhands/agent-server@{state['upstream_digest']}`\n"
             f"Agent Server: {state['agent_server_version']}. Previous immutable releases remain available for rollback.\n\n"

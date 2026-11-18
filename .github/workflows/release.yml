@@ -253,6 +253,7 @@ jobs:
             functional-pass.json
             layer-classifications.json
             security/credential-policy.json
+            security/credential-baseline.json
             state.json
             security/policy.json
             selection.json

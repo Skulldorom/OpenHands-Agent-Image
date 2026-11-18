@@ -50,7 +50,7 @@ BUILD_INPUTS = ["Dockerfile", ".dockerignore", "scripts/init-git.sh"]
 INPUT_GROUPS = {
     "image": BUILD_INPUTS,
     "functional": ["compatibility.json", "scripts/validate-image.sh", "scripts/evidence.py", "tests/test-git-identity.sh", "tests/test-postgresql.sh", "tests/test-agent-startup.sh", "tests/test-image-layers.py"],
-    "security": ["security/policy.json", "security/credential-policy.json", "security/vendor-evidence.json", "scripts/security-assessment.py", "scripts/promotion.py", ".github/workflows/release.yml"],
+    "security": ["security/policy.json", "security/credential-policy.json", "security/credential-baseline.json", "security/vendor-evidence.json", "scripts/security-assessment.py", "scripts/promotion.py", ".github/workflows/release.yml"],
     "publishing": ["scripts/release.py", "scripts/promotion.py", ".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/workflows/upstream-update.yml"],
 }
 STATES = {"build_failed", "built", "functional_failed", "functional_passed", "security_failed", "validated", "published"}

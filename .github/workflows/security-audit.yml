@@ -111,6 +111,8 @@ jobs:
             high-critical-inventory.md
             candidate-trivy.json
             layer-classifications.json
+            security/credential-policy.json
+            security/credential-baseline.json
             upstream-trivy.json
             upstream-digest.txt
             scanner-version.json

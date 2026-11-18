@@ -1,0 +1,139 @@
+name: OpenHands image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+# Keep production workflows serialized, including their validation jobs.
+# PRs and branch dispatches cannot enter the production concurrency group.
+concurrency:
+  group: ${{ github.ref == 'refs/heads/main' && 'openhands-production' || format('openhands-{0}', github.ref) }}
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: ghcr.io/openhands/agent-server:latest-python
+  IMAGE: ghcr.io/skulldorom/openhands-agent
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      upstream: ${{ steps.plan.outputs.upstream }}
+      digest: ${{ steps.build.outputs.digest }}
+      artifact: ${{ steps.archive.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install Skopeo
+        run: command -v skopeo || (sudo apt-get update && sudo apt-get install -y --no-install-recommends skopeo)
+      - name: Test update and publication guards
+        run: bash tests/test-registry.sh
+      - name: Resolve upstream and decide whether to build
+        id: plan
+        run: scripts/registry.sh plan
+      - name: Verify upstream startup contract
+        if: steps.plan.outputs.build == 'true'
+        env:
+          UPSTREAM_DIGEST: ${{ steps.plan.outputs.upstream }}
+        run: scripts/registry.sh check-base
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        if: steps.plan.outputs.build == 'true'
+      - name: Build OCI image
+        id: build
+        if: steps.plan.outputs.build == 'true'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          tags: openhands-validation:local
+          outputs: type=oci,dest=${{ runner.temp }}/image.tar
+          provenance: mode=min
+          build-args: UPSTREAM_IMAGE=ghcr.io/openhands/agent-server@${{ steps.plan.outputs.upstream }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.base.name=${{ env.UPSTREAM }}
+            org.opencontainers.image.base.digest=${{ steps.plan.outputs.upstream }}
+            io.openhands-agent-image.inputs=${{ steps.plan.outputs.inputs }}
+      - name: Test the built image
+        if: steps.plan.outputs.build == 'true'
+        env:
+          DOCKER_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          skopeo inspect --raw "oci-archive:$RUNNER_TEMP/image.tar" | sha256sum --check <(
+            printf '%s  -\n' "${DOCKER_DIGEST#sha256:}"
+          )
+          skopeo copy "oci-archive:$RUNNER_TEMP/image.tar" docker-daemon:openhands-validation:local
+          bash tests/test-git-identity.sh
+          docker run --rm -v "$PWD/tests/test-git-identity.sh:/tmp/test-git-identity.sh:ro" \
+            openhands-validation:local --exec bash /tmp/test-git-identity.sh /usr/local/bin/init-git
+          bash tests/test-agent-startup.sh openhands-validation:local
+          bash tests/test-postgresql.sh openhands-validation:local
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        if: steps.plan.outputs.build == 'true'
+        with:
+          version: v0.69.3
+          cache: true
+      - name: Check vulnerabilities and secrets
+        if: steps.plan.outputs.build == 'true'
+        env:
+          UPSTREAM_DIGEST: ${{ steps.plan.outputs.upstream }}
+        run: scripts/scan-image.sh openhands-validation:local
+      - name: Pass the tested archive to the publisher
+        if: steps.plan.outputs.build == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        id: archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tested-image-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/image.tar
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    needs: validate
+    if: >-
+      github.repository == 'Skulldorom/OpenHands-Agent-Image' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      needs.validate.outputs.build == 'true' && needs.validate.outputs.artifact != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install Skopeo
+        run: command -v skopeo || (sudo apt-get update && sudo apt-get install -y --no-install-recommends skopeo)
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.validate.outputs.artifact }}
+          path: ${{ runner.temp }}
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Publish tested digest to GHCR
+        env:
+          IMAGE_DIGEST: ${{ needs.validate.outputs.digest }}
+          UPSTREAM_DIGEST: ${{ needs.validate.outputs.upstream }}
+        run: scripts/registry.sh publish "$RUNNER_TEMP/image.tar"

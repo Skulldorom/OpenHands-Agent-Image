@@ -21,6 +21,7 @@ defaults:
 concurrency:
   group: ${{ github.ref == 'refs/heads/main' && 'openhands-production' || format('openhands-{0}', github.ref) }}
   cancel-in-progress: false
+  queue: max
 
 env:
   UPSTREAM: ghcr.io/openhands/agent-server:latest-python

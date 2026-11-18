@@ -46,7 +46,7 @@ GIT_USER_NAME=Your Git Name
 GIT_USER_EMAIL=your-address@example.com
 ```
 
-This alone does **not** forward values into conversation containers. Agent Server 1.62.0 has an explicit Docker environment allowlist. Apply and stage-test the exact host application customization in [README.md](README.md#agent-canvas-integration-and-forwarding), or implement an equivalent reviewed per-conversation mapping. Neither the image nor updater applies that host change. Do not assume `.agent-canvas.env` is read by every launcher. Never add arbitrary environment forwarding or tokens to the allowlist.
+This alone does **not** forward values into conversation containers. Agent Server 1.62.0 has an explicit Docker environment allowlist. In a separately reviewed host application change, locate the Docker conversation environment allowlist for the deployed Agent Server version. Add only `GIT_USER_NAME` and `GIT_USER_EMAIL` to that existing explicit mapping, taking values from the host process environment only when present. Do not forward the whole environment. Keep the change in the host application source/configuration, not an ad-hoc edit to installed packages. Stage-test a new conversation with real commits, then apply during normal host maintenance. If the deployed version exposes no supported configuration hook, maintain a small reviewed source patch pinned to that version. This repository does not supply or execute a host patch. Neither the image nor updater applies that host change. Do not assume `.agent-canvas.env` is read by every launcher. Never add arbitrary environment forwarding or tokens to the allowlist.
 
 Runtime defaults intentionally do not override existing global/repository-local Git identities. Inspect those in a new conversation if attribution differs. The public image contains no personal identity; your values are supplied at runtime only.
 
@@ -63,7 +63,7 @@ For safer production pinning, replace `:latest` with `@sha256:RELEASE_DIGEST`. R
 
 ## 5. Verify a fresh conversation
 
-Run `git var GIT_AUTHOR_IDENT`, `git var GIT_COMMITTER_IDENT`, a real commit in a temporary repository, and all seven PostgreSQL version commands from the task. Confirm no automatic PostgreSQL process exists. Verify connection to the existing provisioned external database using its injected settings, without printing secrets. Confirm browser, terminal, persistence and workspace behavior. Keep existing PostgreSQL manager/volumes and cleanup protections unchanged.
+Run `git var GIT_AUTHOR_IDENT`, `git var GIT_COMMITTER_IDENT`, a real commit in a temporary repository, and all seven PostgreSQL version commands from the task. Confirm no automatic PostgreSQL process exists. If an independently configured external database is used, verify it through its protected settings without printing secrets. Confirm browser, terminal, persistence and workspace behavior. The old PostgreSQL provisioning manager has already been removed. Do not reinstall it. Preserve any separately managed data volumes and cleanup protections.
 
 ## 6. Optional pull-only staging updater
 

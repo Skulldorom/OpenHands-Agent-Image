@@ -1,29 +1,153 @@
-# Security policy
+# Security and release policy
 
-Only the newest successful release on the approved Agent Server version is maintained. Digest/version pins remain available for rollback but never receive fixes in place.
+## Official upstream baseline
 
-Report vulnerabilities privately through GitHub Security Advisories. If private reporting is unavailable, contact the repository owner without posting exploit details or secrets publicly. Never attach credentials, private keys, personal data or complete environment dumps.
+This image extends `ghcr.io/openhands/agent-server`. The official exact upstream digest is our security baseline. We report all inherited vulnerabilities without pretending they are fixed, unreachable or harmless. Unchanged inherited HIGH/CRITICAL vulnerabilities do not automatically prevent release, whether or not a fix is advertised. There are no ordinary inherited-risk exception records, approval renewals or per-CVE expiry matches.
 
-CI gates releases with vulnerability and secret scanning. Complete inventories retain every severity and unfixed finding without scanner suppressions. A separate risk gate blocks all CRITICAL findings, HIGH/CRITICAL findings with advertised fixes (conservatively including module fixes pending supported binary verification), HIGH/CRITICAL findings this image introduces relative to its exact upstream base, and explicitly designated high-risk CVEs regardless of fix availability. Unfixed HIGH findings inherited from upstream remain visible as unresolved risks, not claims of safety or accepted CVE exceptions. There are currently **no accepted exceptions**, VEX not-affected assertions, or ignore entries. The machine-readable policy is `security/policy.json`; its owner and review deadline are enforced. A new exception must identify CVE, exact package/version scope, reason, owner, review deadline and evidence and implement reviewed narrow matching; the current gate rejects all exception entries. Inspect inherited upstream risks and reports. A passing scan is not proof of security: database coverage, detection limits and later disclosures still require review.
+The audit stays enabled. A passing customization comparison is not a claim that the image is vulnerability-free or universally safe. Operators still need to assess whether official OpenHands is suitable for their workloads. Compatible upstream updates are monitored daily and bring upstream security improvements automatically. New Agent Server versions require explicit runtime-contract compatibility review; currently only 1.62.0 is approved.
 
-Builds replace the upstream Debian snapshot with signed live trixie, trixie-updates and trixie-security repositories to install PostgreSQL 17 and its necessary dependencies. No broad package upgrade or Docker vendor-channel rewrite is performed; inherited tools remain intact. The approved Agent Server Python version stays unchanged. CI retains the package inventory and complete all-severity JSON report, including unfixed findings. Package-generated snakeoil certificate/key files are removed before their installation RUN completes; CI inspects every saved layer, not only the merged filesystem. An inherited lower-layer key fails this test and cannot be fixed by a later whiteout. Unknown upstream versions/contracts fail closed. BuildKit attaches SBOM/provenance. Actions use SHA pins; review updates manually. Dependabot PR creation is disabled for this direct-main repository.
+## Mandatory release gates
 
-Git attribution is not authentication. Runtime identity stays in private container-local /tmp; never share that mount between conversations. PostgreSQL never starts automatically; test clusters use private Unix sockets. No runtime Docker socket or privilege escalation is required for these features.
+Publication requires all of the following:
 
-Installing the optional host updater requires explicit operator action and Docker administrator access. Check capacity and preserve previous images. Never prune volumes or delete workspaces to make room. No infrastructure deployment is performed by this repository.
+- Complete unsuppressed UNKNOWN through CRITICAL scans of the exact candidate and exact upstream base with Trivy 0.69.3 and one frozen database. No ignore-unfixed or directory/severity suppression.
+- No HIGH/CRITICAL vulnerability added by our image relative to that base. Comparison binds CVE, package, installed version, affected target, result class/type and severity. A CVE in one upstream binary never authorizes the same CVE in a custom-added binary.
+- No materially worsened inherited vulnerability. Increased severity blocks. Any changed version that remains vulnerable to the same CVE in the same target is conservatively treated as potential worsening, even at lower severity; we do not guess version ordering across Debian, Go and other ecosystems. Remediate the changed vulnerable component; if vulnerability disappears, it is reported removed. Same-version severity reductions remain visible as improvements.
+- Credential findings introduced or materially changed by customization block publication. The complete saved-layer inventory of the exact reviewed official upstream is the credential baseline. Its five unchanged token-shaped findings remain **unclassified, accepted inherited risk**; this is the owner's explicit baseline-risk decision of 18 November 2026, not a finding that the values are harmless, fake or expired. Confirmed dangerous credentials, unclassified private-key payloads and exposed credential files block even when inherited. The 14 verified public test keys retain exact payload/type/file/layer classifications. No binary, file, directory or historical layer is excluded.
+- No match against an explicitly reviewed emergency block, at any severity.
+- Passing Git identity, PostgreSQL initialization/query/backup/restore, Agent Server readiness/API/entrypoint/signals and metadata/compatibility tests.
+- Verified original signed build provenance, exact source/base/image binding, signed same-run functional evidence, sealed artifact hashes, fresh scans (24-hour limit), current policy fingerprints and current main/upstream identity. Missing, failed, incomplete, stale, suppressed or unverifiable evidence blocks publication.
 
+Functional build success never authorizes publication on its own. Main pushes and manual dispatch always build a fresh candidate; scheduled checks reuse only provenance-verified candidates when image inputs are unchanged. Every selected candidate gets fresh complete validation and security assessment. The security policy change itself therefore requires a fresh assessment. PRs never publish production images.
 
-## Initial release remediation investigation
+## Credential baseline risk decision
 
-The first candidate scan reported 112 HIGH vulnerability instances, no CRITICAL instances, and one package-generated snakeoil private key. PostgreSQL contributed 102 instances across `libpq5`, `postgresql-17`, and `postgresql-client-17` at `17.11-0+deb13u1`; Debian provides `17.12-0+deb13u1`. The PostgreSQL server/client are our additions. The upstream Dockerfile does not explicitly install PostgreSQL; the CI inventory records the inherited libpq presence separately where applicable. Six inherited `linux-libc-dev` findings at `6.12.116-1` have a Debian fix at `6.12.117-1`. The frozen upstream November 10 Debian snapshot prevented access to these fixes.
+`security/credential-policy.json` records one accepted official upstream digest and one hash/count of its complete 19-finding inventory. [The baseline inventory](security/credential-baseline.json) preserves metadata for all 14 public test keys and five unclassified token-shaped findings, with the exact authenticated source-artifact SHA-256. There are no per-token approval records, age exceptions or expiry renewals.
 
-The following inherited Go dependencies remain in the latest packages examined from the upstream-configured vendor repositories. Module fixes exist, but that does **not** mean fixed vendor binaries exist. Retaining these tools preserves upstream functionality; removing them or replacing their dependencies without rebuilding and compatibility validation is not a safe remedy.
+Both upstream and candidate are rescanned in full. Finding comparison binds verified layer SHA-256, file path within that immutable layer, rule, full matched-material fingerprint, length, position and relevant PEM/token metadata. The layer hash and member path bind the entire containing file. A new/changed upstream digest or any added, changed, relocated or removed upstream finding requires a reviewed baseline update; automation never rewrites the baseline. Even an unchanged token in a changed layer requires review. Custom-introduced or changed findings always block, including secrets recoverable below later whiteouts.
 
-| CVE | Severity | Binary / owning package | Installed module | Fixed module | Ownership |
-| --- | --- | --- | --- | --- | --- |
-| CVE-2026-78661 | HIGH | `/usr/bin/gh`, GitHub CLI `gh` 2.104.0 | `golang.org/x/net` v0.61.0 | v0.62.0 | Inherited; GitHub CLI vendor |
-| CVE-2026-78661 | HIGH | `/usr/bin/rootlesskit`, Docker `docker-ce-rootless-extras` 29.9.3 | `golang.org/x/net` v0.60.0 | v0.62.0 | Inherited; Docker/RootlessKit vendors |
-| CVE-2026-78661 | HIGH | Docker Compose, `docker-compose-plugin` 5.7.1 | `golang.org/x/net` v0.60.0 | v0.62.0 | Inherited; Docker Compose vendor |
-| CVE-2026-17106 | HIGH | Docker Buildx, `docker-buildx-plugin` 0.39.0 | `github.com/moby/go-archive` v0.2.0 | v0.3.0 | Inherited; Docker Buildx/Moby vendors |
+A small `confirmed_dangerous` denylist can record independently confirmed live/exposed/dangerous findings with reason and evidence. It only blocks; it never waives risk or authorizes authentication attempts. Exposed private keys/credential files also block directly. An inherited finding cannot override these prohibitions merely by matching the accepted inventory.
 
-Vendor package metadata and downloaded package SHA-256 hashes were checked, and embedded Go module build information was inspected without executing those binaries. CI scans the actual built candidate; its retained JSON and package inventory are authoritative for that candidate. These findings remain release blockers unless the actual candidate report proves remediation. No exceptions or custom rebuilds have been introduced. See [the focused assessment](security/ASSESSMENT.md) for current evidence, CVE-2026-6653 exposure and the separate inventory/gate policy.
+Schema-3 reports preserve both inventories, classifications, unchanged unknowns, introduced/removed findings, baseline-drift decision and dangerous findings. The publisher independently validates inventory counts and layer membership, rederives comparison and the risk decision, and verifies sealed policy/report/baseline bytes, source provenance and freshness. Missing, inconsistent or altered evidence fails closed. Raw credential values and private-key payloads are never logged or attached.
+
+The vulnerability baseline, all 530 recorded inherited HIGH/CRITICAL instances, emergency CVE policy and build/release behavior are unchanged. Current Trivy scans report zero secrets; the five accepted unknown findings come from the independent full-layer scanner. Complete future scans remain mandatory.
+
+## Emergency denylist
+
+`security/policy.json` has schema 2 and a small `emergency_blocks` list, initially empty. Each record requires an exact `cve`, a meaningful `reason`, `reviewed_by`, `reviewed_at` (ISO date, not future-dated) and an HTTPS `evidence_url` linking the review/advisory. Reviewed policy changes add/remove emergency blocks; automation does not create them from severity counts. Duplicate/malformed records and obsolete acceptance fields fail closed. A matching vulnerability cannot be waived by inheritance or ordinary exception records.
+
+The five former `high_risk_cves` entries were reviewed for migration:
+
+| Former CVE | Recorded rationale | Migration decision |
+| --- | --- | --- |
+| CVE-2026-6653 | General XML exposure; unreachability not proven | Report inherited risk; no documented emergency prohibition |
+| CVE-2026-78661 | Network tools affected; vendor binary still vulnerable | Report inherited risk; no documented emergency prohibition |
+| CVE-2026-17106 | Potential archive/build-input exposure | Report inherited risk; no documented emergency prohibition |
+| CVE-2026-41567 | Embedded Docker code; unreachability not proven | Report inherited risk; no documented emergency prohibition |
+| CVE-2026-42306 | Embedded Docker code; unreachability not proven | Report inherited risk; no documented emergency prohibition |
+
+Those rationales describe potential upstream exposure and absent remediation, rather than a separately documented emergency/incident prohibition. They are retired as automatic inherited blockers under the owner’s requested baseline policy. Their findings stay in complete reports. This is not an exploitability or safety finding; future documented evidence can justify explicit emergency blocks.
+
+## Reporting and upstream changes
+
+CI summaries and release notes distinguish **Custom image security: PASS/FAIL** from **Inherited upstream security: reported, not automatically blocked**. The separate release gate can still fail an emergency block when the customization comparison passes.
+
+Every report includes both image digests, upstream/candidate severity totals, inherited-unchanged/introduced/removed/materially-worsened counts, introduced HIGH/CRITICAL findings, emergency matches and detected secrets. Complete raw Trivy reports, scanner identity, frozen database/hash, comparison, policy, source/build/test evidence and baseline descriptor are attached to immutable release evidence. A new reassessment appends its own content-addressed archive and never overwrites the original approval or release source.
+
+The previous approved release’s original approval archive is checked against its immutable SHA-256 commitment to identify the previous official upstream digest. That previous digest is rescanned with the same scanner/database as both current images. New upstream findings are highlighted independently of custom additions; they do not become custom blockers solely because they appeared upstream. Database disclosures common to both upstream versions are not mislabeled image regressions. The first release explicitly reports that a previous approved baseline is unavailable, rather than claiming zero new upstream risks. Missing baseline evidence or scan failures block; a concurrent baseline change requires reassessment.
+
+Initial release remains v1.0.0, later releases default to patch, explicit version bumps remain available, and byte-identical images reuse the existing release unless explicitly bumped. Immutable tags, latest ownership, pending-publication recovery and rollback remain enforced. A pending reserved digest must be recovered before a different candidate publishes; superseded pending upstream/content requires maintainer review. Production GitHub/GHCR publication and recovery remain untested end to end.
+
+## Historical assessments
+
+[HIGH/CRITICAL inventory](security/HIGH-CRITICAL.md), [priority assessment](security/PRIORITY-ASSESSMENT.md), the inactive `security/proposed-acceptances.json`, [credential investigation](security/CREDENTIAL-LAYER-INVESTIGATION.md) and [Compose verification](security/COMPOSE-VERIFICATION.md) retain historical evidence. Old blanket-block decisions and acceptance proposals are historical, have no active publication role, and are superseded by schema 2. The recorded comparison had 530 inherited HIGH/CRITICAL instances, zero introduced HIGH/CRITICAL and zero detected secrets; CI reassesses authenticated scans and also collects fresh audit evidence. Historical scans never substitute for fresh production evidence.
+
+Report security issues privately to the repository maintainer. Do not put credentials or customer data in public issues.
+
+## Operator-only exposure verification
+
+Run these **separately on the Docker host**, not inside a conversation runtime.
+They are read-only; do not send raw container environment values, config files,
+logs or credential contents to a public issue. Set `CID` to one actual conversation
+container, not the OpenHands control-plane container. Repeat for each runtime
+profile; absence of exposure in one container does not establish host policy.
+
+```bash
+CID='<conversation-container-id>'
+docker inspect "$CID" | jq '.[0] | {
+  Id, Image,
+  runtime: (.HostConfig | {Privileged, CapAdd, CapDrop, SecurityOpt,
+    ReadonlyRootfs, NetworkMode, PidMode, IpcMode, Devices}),
+  mounts: [.Mounts[] | {Type, Source, Destination, RW, Propagation}],
+  environment_names: [.Config.Env[]? | split("=")[0]],
+  ports: .NetworkSettings.Ports,
+  networks: (.NetworkSettings.Networks | keys)
+}'
+docker exec "$CID" sh -c '
+  id
+  grep -E "^(Cap|NoNewPrivs|Seccomp)" /proc/1/status
+  cat /proc/1/mountinfo
+  for p in /var/run/docker.sock /run/docker.sock; do
+    if test -S "$p"; then stat -c "%a %u:%g %n" "$p"; fi
+  done
+  for v in DOCKER_HOST DOCKER_CONTEXT; do
+    if printenv "$v" >/dev/null; then printf "%s is set; inspect privately\n" "$v"; fi
+  done
+  cat /proc/net/route
+'
+docker network ls
+docker info --format '{{json .SecurityOptions}}'
+# Host firewall inspection; privilege may be necessary, no rules are changed.
+sudo nft list ruleset
+sudo iptables -S DOCKER-USER
+```
+
+Inspect custom socket mounts, TCP daemon exposure and Docker contexts privately;
+a missing default socket alone does not exclude daemon access. For each network
+from the inspect output, run `docker network inspect '<network>'` and check
+`Internal`, gateway and connected peers. Routes alone do not prove unrestricted
+or restricted egress: inspect the host firewall, Proxmox firewall, proxy and
+provider policy, including IPv6. Do not probe a daemon or external host without
+permission. Review the actual container-creation configuration for forbidden
+mounts, privileged profiles and capability escalation; observation alone does
+not enforce policy.
+
+Mounts, UID/capabilities, read-only rootfs and filesystem permissions determine
+filesystem exposure. Review secret *names* and privately review their injection,
+rotation and scope; do not print values. General-purpose shell/file/browser tools
+can process untrusted XML, HTML and archives. No host setting proves these
+parsers unreachable unless workload/tool restrictions are also enforced and
+reviewed. Record the runtime image digest and profile with each decision.
+
+Recommended controls pending review: no host Docker socket or daemon credentials,
+no privileged execution or host namespaces, no sensitive host mounts, drop
+unneeded capabilities, enforce seccomp/AppArmor, least-privilege ephemeral
+credentials, restrict egress and isolate untrusted workloads. These are proposed
+controls, not observations about the live LXC. Inherited risk remains the operator’s responsibility; it is reported without requiring per-CVE approval.
+
+## Isolated publication integration prerequisites
+
+`tests/hosted-publication.py --self-test` performs offline safety checks only.
+The real harness requires an existing, empty, non-fork repository named
+`OWNER/publication-integration-NAME`, with an initial commit and description
+containing `[publication-integration-only]`. It uses a unique package under
+`ghcr.io/OWNER/publication-integration-NAME-UUID` and only an
+`integration-latest-UUID` alias. A non-deployable, zero-layer OCI fixture exercises
+the real publisher; it is **not** security authorization for a deployable image.
+
+Use only the sandbox repository's scoped `GITHUB_TOKEN`, with job-level
+`contents: write` and `packages: write`. No PAT or repository secret is required.
+Copy the five files listed in [the minimal setup](security/PUBLICATION-TEST-SETUP.md)
+to that dedicated repository's `main`; no production workflow is needed. The
+sandbox Environment can be unprotected and empty, and GitHub creates it when
+referenced if it does not exist, subject to account policy. Source-repository
+runs are excluded by repository/input guards; test packages link to the sandbox.
+No production `latest` tag is used. Actual hosted publication remains unverified
+until that sandbox is created and the harness passes there.
+
+The harness interrupts after assets persist, retries twice, checks unchanged
+asset IDs/bytes and original release body, appends a distinct reassessment,
+checks immutable tags and the test alias, and rejects an older version after a
+new reservation. Cleanup is opt-in after success and deletes only recorded IDs
+whose identity still matches; failures retain the ledger and evidence. Never
+point it at the production repository/package, even for cleanup.

@@ -1,0 +1,616 @@
+{
+  "artifact_id": 14327198572,
+  "authorization": "none; all findings remain blocking",
+  "binaries": [
+    {
+      "advisories": [
+        {
+          "affected": [
+            {
+              "ecosystem_specific": {
+                "imports": [
+                  {
+                    "path": "github.com/docker/docker/daemon",
+                    "symbols": [
+                      "Daemon.openContainerFS"
+                    ]
+                  }
+                ]
+              },
+              "package": {
+                "ecosystem": "Go",
+                "name": "github.com/docker/docker"
+              },
+              "ranges": [
+                {
+                  "events": [
+                    {
+                      "introduced": "0"
+                    }
+                  ],
+                  "type": "SEMVER"
+                }
+              ]
+            },
+            {
+              "ecosystem_specific": {
+                "imports": [
+                  {
+                    "path": "github.com/moby/moby/daemon",
+                    "symbols": [
+                      "Daemon.openContainerFS"
+                    ]
+                  }
+                ]
+              },
+              "package": {
+                "ecosystem": "Go",
+                "name": "github.com/moby/moby"
+              },
+              "ranges": [
+                {
+                  "events": [
+                    {
+                      "introduced": "0"
+                    }
+                  ],
+                  "type": "SEMVER"
+                }
+              ]
+            },
+            {
+              "ecosystem_specific": {
+                "imports": [
+                  {
+                    "path": "github.com/moby/moby/v2/daemon",
+                    "symbols": [
+                      "Daemon.openContainerFS"
+                    ]
+                  }
+                ]
+              },
+              "package": {
+                "ecosystem": "Go",
+                "name": "github.com/moby/moby/v2"
+              },
+              "ranges": [
+                {
+                  "events": [
+                    {
+                      "introduced": "0"
+                    },
+                    {
+                      "fixed": "2.0.0-beta.14"
+                    }
+                  ],
+                  "type": "SEMVER"
+                }
+              ]
+            }
+          ],
+          "aliases": [
+            "CVE-2026-42306",
+            "GHSA-rg2x-37c3-w2rh"
+          ],
+          "id": "GO-2026-5617"
+        },
+        {
+          "affected": [
+            {
+              "ecosystem_specific": {
+                "imports": [
+                  {
+                    "path": "github.com/docker/docker/daemon",
+                    "symbols": [
+                      "Daemon.containerExtractToDir"
+                    ]
+                  }
+                ]
+              },
+              "package": {
+                "ecosystem": "Go",
+                "name": "github.com/docker/docker"
+              },
+              "ranges": [
+                {
+                  "events": [
+                    {
+                      "introduced": "0"
+                    }
+                  ],
+                  "type": "SEMVER"
+                }
+              ]
+            },
+            {
+              "ecosystem_specific": {
+                "imports": [
+                  {
+                    "path": "github.com/moby/moby/daemon",
+                    "symbols": [
+                      "Daemon.containerExtractToDir"
+                    ]
+                  }
+                ]
+              },
+              "package": {
+                "ecosystem": "Go",
+                "name": "github.com/moby/moby"
+              },
+              "ranges": [
+                {
+                  "events": [
+                    {
+                      "introduced": "0"
+                    }
+                  ],
+                  "type": "SEMVER"
+                }
+              ]
+            },
+            {
+              "ecosystem_specific": {
+                "imports": [
+                  {
+                    "path": "github.com/moby/moby/v2/daemon",
+                    "symbols": [
+                      "Daemon.containerExtractToDir"
+                    ]
+                  }
+                ]
+              },
+              "package": {
+                "ecosystem": "Go",
+                "name": "github.com/moby/moby/v2"
+              },
+              "ranges": [
+                {
+                  "events": [
+                    {
+                      "introduced": "0"
+                    },
+                    {
+                      "fixed": "2.0.0-beta.14"
+                    }
+                  ],
+                  "type": "SEMVER"
+                }
+              ]
+            }
+          ],
+          "aliases": [
+            "CVE-2026-41567",
+            "GHSA-x86f-5xw2-fm2r"
+          ],
+          "id": "GO-2026-5746"
+        },
+        {
+          "affected": [
+            {
+              "ecosystem_specific": {},
+              "package": {
+                "ecosystem": "Go",
+                "name": "github.com/moby/go-archive"
+              },
+              "ranges": [
+                {
+                  "events": [
+                    {
+                      "introduced": "0"
+                    },
+                    {
+                      "fixed": "0.3.0"
+                    }
+                  ],
+                  "type": "SEMVER"
+                }
+              ]
+            }
+          ],
+          "aliases": [
+            "CVE-2026-17106",
+            "GHSA-hfg8-hc9c-6c3h"
+          ],
+          "id": "GO-2026-6253"
+        },
+        {
+          "affected": [
+            {
+              "ecosystem_specific": {
+                "imports": [
+                  {
+                    "path": "golang.org/x/net/html",
+                    "symbols": [
+                      "Parse",
+                      "ParseFragment",
+                      "ParseFragmentWithOptions",
+                      "ParseWithOptions",
+                      "parser.addText",
+                      "parser.fosterParent",
+                      "parser.parse"
+                    ]
+                  }
+                ]
+              },
+              "package": {
+                "ecosystem": "Go",
+                "name": "golang.org/x/net"
+              },
+              "ranges": [
+                {
+                  "events": [
+                    {
+                      "introduced": "0"
+                    },
+                    {
+                      "fixed": "0.62.0"
+                    }
+                  ],
+                  "type": "SEMVER"
+                }
+              ]
+            }
+          ],
+          "aliases": [
+            "CVE-2026-78661"
+          ],
+          "id": "GO-2026-6860"
+        }
+      ],
+      "binary_go_version": "go1.27.4",
+      "binary_sha256": "54318328408fc650ba619992a0f49a2f712975e1110c805d1b225fdbac3126a2",
+      "interpretation": "A module-only observation is not a symbol-level hit. Absence supports a narrow review for symbol-scoped advisories, not a blanket reachability or host-safety claim. Advisories without affected-package/symbol metadata remain unresolved.",
+      "name": "docker-buildx",
+      "observations": [
+        {
+          "osv": "GO-2026-5617",
+          "trace": [
+            {
+              "module": "github.com/docker/docker",
+              "version": "v28.5.2+incompatible"
+            }
+          ]
+        },
+        {
+          "osv": "GO-2026-5746",
+          "trace": [
+            {
+              "module": "github.com/docker/docker",
+              "version": "v28.5.2+incompatible"
+            }
+          ]
+        },
+        {
+          "fixed_version": "v0.3.0",
+          "osv": "GO-2026-6253",
+          "trace": [
+            {
+              "module": "github.com/moby/go-archive",
+              "version": "v0.2.0"
+            }
+          ]
+        }
+      ],
+      "scan_sha256": "ac8c5915559c64aadb36dc92583815e5f727f7771a7e2b55be23ef6d122008f2",
+      "scanner": {
+        "db": "https://vuln.go.dev",
+        "db_last_modified": "2026-11-11T02:51:11Z",
+        "protocol_version": "v1.0.0",
+        "scan_level": "symbol",
+        "scan_mode": "binary",
+        "scanner_name": "govulncheck",
+        "scanner_version": "v1.1.4"
+      }
+    },
+    {
+      "advisories": [
+        {
+          "affected": [
+            {
+              "ecosystem_specific": {},
+              "package": {
+                "ecosystem": "Go",
+                "name": "github.com/moby/go-archive"
+              },
+              "ranges": [
+                {
+                  "events": [
+                    {
+                      "introduced": "0"
+                    },
+                    {
+                      "fixed": "0.3.0"
+                    }
+                  ],
+                  "type": "SEMVER"
+                }
+              ]
+            }
+          ],
+          "aliases": [
+            "CVE-2026-17106",
+            "GHSA-hfg8-hc9c-6c3h"
+          ],
+          "id": "GO-2026-6253"
+        },
+        {
+          "affected": [
+            {
+              "ecosystem_specific": {
+                "imports": [
+                  {
+                    "path": "golang.org/x/net/html",
+                    "symbols": [
+                      "Parse",
+                      "ParseFragment",
+                      "ParseFragmentWithOptions",
+                      "ParseWithOptions",
+                      "parser.addText",
+                      "parser.fosterParent",
+                      "parser.parse"
+                    ]
+                  }
+                ]
+              },
+              "package": {
+                "ecosystem": "Go",
+                "name": "golang.org/x/net"
+              },
+              "ranges": [
+                {
+                  "events": [
+                    {
+                      "introduced": "0"
+                    },
+                    {
+                      "fixed": "0.62.0"
+                    }
+                  ],
+                  "type": "SEMVER"
+                }
+              ]
+            }
+          ],
+          "aliases": [
+            "CVE-2026-78661"
+          ],
+          "id": "GO-2026-6860"
+        }
+      ],
+      "binary_go_version": "go1.27.4",
+      "binary_sha256": "af426722a8af5de812fcee30cc1c39f0639f5f723cbadefb25e5d4db054064cf",
+      "interpretation": "A module-only observation is not a symbol-level hit. Absence supports a narrow review for symbol-scoped advisories, not a blanket reachability or host-safety claim. Advisories without affected-package/symbol metadata remain unresolved.",
+      "name": "docker-compose",
+      "observations": [
+        {
+          "fixed_version": "v0.62.0",
+          "osv": "GO-2026-6860",
+          "trace": [
+            {
+              "module": "golang.org/x/net",
+              "version": "v0.60.0"
+            }
+          ]
+        }
+      ],
+      "scan_sha256": "3fc09b49a1056f9322c492f102f857b4a894993f610716ef50e25f8ebc171ee9",
+      "scanner": {
+        "db": "https://vuln.go.dev",
+        "db_last_modified": "2026-11-11T02:51:11Z",
+        "protocol_version": "v1.0.0",
+        "scan_level": "symbol",
+        "scan_mode": "binary",
+        "scanner_name": "govulncheck",
+        "scanner_version": "v1.1.4"
+      }
+    },
+    {
+      "advisories": [
+        {
+          "affected": [
+            {
+              "ecosystem_specific": {
+                "imports": [
+                  {
+                    "path": "golang.org/x/net/html",
+                    "symbols": [
+                      "Parse",
+                      "ParseFragment",
+                      "ParseFragmentWithOptions",
+                      "ParseWithOptions",
+                      "parser.addText",
+                      "parser.fosterParent",
+                      "parser.parse"
+                    ]
+                  }
+                ]
+              },
+              "package": {
+                "ecosystem": "Go",
+                "name": "golang.org/x/net"
+              },
+              "ranges": [
+                {
+                  "events": [
+                    {
+                      "introduced": "0"
+                    },
+                    {
+                      "fixed": "0.62.0"
+                    }
+                  ],
+                  "type": "SEMVER"
+                }
+              ]
+            }
+          ],
+          "aliases": [
+            "CVE-2026-78661"
+          ],
+          "id": "GO-2026-6860"
+        }
+      ],
+      "binary_go_version": "go1.27.4",
+      "binary_sha256": "fca7ac8a8386e3ad65c9a96a96cbf272d1dcc4f76de174dae91d54e50729e240",
+      "interpretation": "A module-only observation is not a symbol-level hit. Absence supports a narrow review for symbol-scoped advisories, not a blanket reachability or host-safety claim. Advisories without affected-package/symbol metadata remain unresolved.",
+      "name": "gh",
+      "observations": [
+        {
+          "fixed_version": "v0.62.0",
+          "osv": "GO-2026-6860",
+          "trace": [
+            {
+              "module": "golang.org/x/net",
+              "version": "v0.61.0"
+            }
+          ]
+        },
+        {
+          "fixed_version": "v0.62.0",
+          "osv": "GO-2026-6860",
+          "trace": [
+            {
+              "module": "golang.org/x/net",
+              "package": "golang.org/x/net/html",
+              "version": "v0.61.0"
+            }
+          ]
+        },
+        {
+          "fixed_version": "v0.62.0",
+          "osv": "GO-2026-6860",
+          "trace": [
+            {
+              "function": "ParseFragmentWithOptions",
+              "module": "golang.org/x/net",
+              "package": "golang.org/x/net/html",
+              "version": "v0.61.0"
+            }
+          ]
+        },
+        {
+          "fixed_version": "v0.62.0",
+          "osv": "GO-2026-6860",
+          "trace": [
+            {
+              "function": "ParseWithOptions",
+              "module": "golang.org/x/net",
+              "package": "golang.org/x/net/html",
+              "version": "v0.61.0"
+            }
+          ]
+        },
+        {
+          "fixed_version": "v0.62.0",
+          "osv": "GO-2026-6860",
+          "trace": [
+            {
+              "function": "Parse",
+              "module": "golang.org/x/net",
+              "package": "golang.org/x/net/html",
+              "version": "v0.61.0"
+            }
+          ]
+        },
+        {
+          "fixed_version": "v0.62.0",
+          "osv": "GO-2026-6860",
+          "trace": [
+            {
+              "function": "ParseFragment",
+              "module": "golang.org/x/net",
+              "package": "golang.org/x/net/html",
+              "version": "v0.61.0"
+            }
+          ]
+        }
+      ],
+      "scan_sha256": "1f3c47abcf62bbd378b46f387f48d112402ca089729e383028b114409e546930",
+      "scanner": {
+        "db": "https://vuln.go.dev",
+        "db_last_modified": "2026-11-11T02:51:11Z",
+        "protocol_version": "v1.0.0",
+        "scan_level": "symbol",
+        "scan_mode": "binary",
+        "scanner_name": "govulncheck",
+        "scanner_version": "v1.1.4"
+      }
+    },
+    {
+      "advisories": [
+        {
+          "affected": [
+            {
+              "ecosystem_specific": {
+                "imports": [
+                  {
+                    "path": "golang.org/x/net/html",
+                    "symbols": [
+                      "Parse",
+                      "ParseFragment",
+                      "ParseFragmentWithOptions",
+                      "ParseWithOptions",
+                      "parser.addText",
+                      "parser.fosterParent",
+                      "parser.parse"
+                    ]
+                  }
+                ]
+              },
+              "package": {
+                "ecosystem": "Go",
+                "name": "golang.org/x/net"
+              },
+              "ranges": [
+                {
+                  "events": [
+                    {
+                      "introduced": "0"
+                    },
+                    {
+                      "fixed": "0.62.0"
+                    }
+                  ],
+                  "type": "SEMVER"
+                }
+              ]
+            }
+          ],
+          "aliases": [
+            "CVE-2026-78661"
+          ],
+          "id": "GO-2026-6860"
+        }
+      ],
+      "binary_go_version": "go1.27.4",
+      "binary_sha256": "2303f00cd210f3824b4509741758b8de07bde4e5b768250c56d3edc38f7b967b",
+      "interpretation": "A module-only observation is not a symbol-level hit. Absence supports a narrow review for symbol-scoped advisories, not a blanket reachability or host-safety claim. Advisories without affected-package/symbol metadata remain unresolved.",
+      "name": "rootlesskit",
+      "observations": [
+        {
+          "fixed_version": "v0.62.0",
+          "osv": "GO-2026-6860",
+          "trace": [
+            {
+              "module": "golang.org/x/net",
+              "version": "v0.60.0"
+            }
+          ]
+        }
+      ],
+      "scan_sha256": "d5c467be0d08610b19156ef82f0793b9c2f00a339f497983b8aa6321e4f688b8",
+      "scanner": {
+        "db": "https://vuln.go.dev",
+        "db_last_modified": "2026-11-11T02:51:11Z",
+        "protocol_version": "v1.0.0",
+        "scan_level": "symbol",
+        "scan_mode": "binary",
+        "scanner_name": "govulncheck",
+        "scanner_version": "v1.1.4"
+      }
+    }
+  ],
+  "candidate": "ghcr.io/skulldorom/openhands-agent@sha256:0e8e24ac5258ae9d709886fc3298cb1f028b25146e4c01389056c1fa762e81a0",
+  "evidence_run": "https://github.com/Skulldorom/OpenHands-Agent-Image/actions/runs/44082258745",
+  "upstream": "ghcr.io/openhands/agent-server@sha256:e74009d51a352c3e9e8db30a788b15683de060c0b2f9e71e0b9d19576034c995"
+}

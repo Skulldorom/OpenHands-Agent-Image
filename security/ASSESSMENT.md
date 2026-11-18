@@ -1,5 +1,8 @@
 # Focused release-readiness assessment
 
+> Historical assessment. Blanket inherited-risk blocking and approval proposals below are superseded by the current [upstream-baseline policy](../SECURITY.md). Findings remain evidence, not current release decisions.
+
+
 Assessment date: 2026-11-16. Owner: Skulldorom/OpenHands-Agent-Image maintainers. Review by: 2026-12-16. No accepted exceptions. No live deployment authorization is implied.
 
 ## Evidence and provenance

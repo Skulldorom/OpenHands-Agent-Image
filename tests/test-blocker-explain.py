@@ -60,6 +60,13 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(verdicts[0]["state"], "no-supported-remediation")
         self.assertNotEqual(verdicts[0]["blocker"]["origin"], "inherited finding")
 
+    def test_newer_unverified_release_cannot_inherit_old_binary_verdict(self):
+        record = evidence(shipped="v0.62.0")
+        record['artifacts'][0]['latest_release'] = 'v2.105.0'
+        verdict = module.explain({'blockers': [blocker()]}, record)[0]
+        self.assertEqual(verdict['state'], 'undetermined')
+        self.assertIn('no verified binary inspection', verdict['reason'])
+
     def test_recorded_evidence_matches_published_versions(self):
         record = json.loads(Path("security/vendor-evidence.json").read_text())
         targets = {artifact["target"] for artifact in record["artifacts"]}

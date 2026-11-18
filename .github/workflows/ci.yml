@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       bump:
-        description: Release increment (auto uses commit directives)
+        description: Release increment; fresh build still requires every security gate
         type: choice
         options: [auto, patch, minor, major]
         default: auto
@@ -17,6 +17,8 @@ jobs:
       actions: read
       contents: write
       packages: write
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/release.yml
     with:
       bump: ${{ inputs.bump || 'auto' }}

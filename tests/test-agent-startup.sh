@@ -27,7 +27,8 @@ for ((i=0;i<90;i++)); do
  sleep 2
 done
 [[ "$ready" == true ]]
-curl -fsS --max-time 10 -H "X-Session-API-Key: $key" "http://127.0.0.1:$port/server_info" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["version"] == "1.62.0", d'
+approved=$(python3 -c 'import json; print(",".join(json.load(open("compatibility.json"))["approved_agent_server_versions"]))')
+curl -fsS --max-time 10 -H "X-Session-API-Key: $key" "http://127.0.0.1:$port/server_info" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["version"] in sys.argv[1].split(","), d' "$approved"
 processes=$(docker top "$cid" -eo pid,comm | awk 'NR > 1 {print $2}')
 if grep -Ex 'postgres|postmaster' <<< "$processes"; then exit 1; fi
 grep -q tini <<< "$processes"
